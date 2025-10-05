@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HubSpotEvidence",
+  "type": "object",
+  "required": [
+    "category",
+    "patternId",
+    "match",
+    "source",
+    "confidence"
+  ],
+  "properties": {
+    "category": {
+      "type": "string",
+      "enum": [
+        "tracking",
+        "forms",
+        "chat",
+        "ctas",
+        "meetings",
+        "cms",
+        "files",
+        "video",
+        "email",
+        "cookies",
+        "headers"
+      ]
+    },
+    "patternId": {
+      "type": "string"
+    },
+    "match": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "html",
+        "script",
+        "url",
+        "cookie",
+        "header",
+        "har",
+        "other"
+      ]
+    },
+    "hubId": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "definitive",
+        "strong",
+        "moderate",
+        "weak"
+      ]
+    },
+    "context": {
+      "type": "string"
+    }
+  }
+}

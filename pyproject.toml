@@ -1,0 +1,25 @@
+
+[build-system]
+requires = ["setuptools>=67", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hubspot-crawler"
+version = "1.0.0"
+description = "Public-web HubSpot detection crawler (static + optional headless)"
+authors = [{name="Whitehat SEO"}]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "httpx>=0.27.0",
+  "beautifulsoup4>=4.12.2",
+  "lxml>=5.0.0",
+]
+[project.optional-dependencies]
+validate = ["jsonschema>=4.21.1"]
+render = ["playwright>=1.46.0"]
+[project.scripts]
+hubspot-crawl = "hubspot_crawler.cli:main"
+
+[tool.setuptools.package-data]
+hubspot_crawler = ["patterns/*.json", "schemas/*.json"]

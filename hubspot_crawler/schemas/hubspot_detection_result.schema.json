@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "HubSpotDetectionResult",
+  "type": "object",
+  "required": [
+    "url",
+    "timestamp",
+    "summary",
+    "evidence"
+  ],
+  "properties": {
+    "url": {
+      "type": "string",
+      "format": "uri"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "hubspot_detected": {
+      "type": "boolean",
+      "description": "True if any HubSpot code, tracking, or features detected (tracking, CMS, or any feature)"
+    },
+    "hubIds": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "tracking",
+        "cmsHosting",
+        "features",
+        "confidence"
+      ],
+      "properties": {
+        "tracking": {
+          "type": "boolean"
+        },
+        "cmsHosting": {
+          "type": "boolean"
+        },
+        "features": {
+          "type": "object",
+          "properties": {
+            "forms": {
+              "type": "boolean"
+            },
+            "chat": {
+              "type": "boolean"
+            },
+            "ctasLegacy": {
+              "type": "boolean"
+            },
+            "meetings": {
+              "type": "boolean"
+            },
+            "video": {
+              "type": "boolean"
+            },
+            "emailTrackingIndicators": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "definitive",
+            "strong",
+            "moderate",
+            "weak"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      }
+    },
+    "headers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "url_variation": {
+      "type": "object",
+      "description": "Present when a URL variation was used instead of the original URL",
+      "required": [
+        "original_url",
+        "working_url",
+        "variation_type"
+      ],
+      "properties": {
+        "original_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The original URL that was requested"
+        },
+        "working_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The URL variation that successfully returned results"
+        },
+        "variation_type": {
+          "type": "string",
+          "description": "Type of variation that was applied",
+          "enum": [
+            "auto"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "http_status": {
+      "type": "integer",
+      "description": "HTTP status code from the response (e.g., 200, 404, 500)"
+    },
+    "page_metadata": {
+      "type": "object",
+      "description": "Basic page metadata extracted from HTML",
+      "properties": {
+        "title": {
+          "type": ["string", "null"],
+          "description": "Content of the <title> tag"
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "Content of the meta description tag"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "Evidence": {
+      "type": "object",
+      "required": [
+        "category",
+        "patternId",
+        "match",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": [
+            "tracking",
+            "forms",
+            "chat",
+            "ctas",
+            "meetings",
+            "cms",
+            "files",
+            "video",
+            "email",
+            "cookies",
+            "headers"
+          ]
+        },
+        "patternId": {
+          "type": "string"
+        },
+        "match": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "html",
+            "script",
+            "url",
+            "cookie",
+            "header",
+            "har",
+            "other"
+          ]
+        },
+        "hubId": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "confidence": {
+          "type": "string",
+          "enum": [
+            "definitive",
+            "strong",
+            "moderate",
+            "weak"
+          ]
+        },
+        "context": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
