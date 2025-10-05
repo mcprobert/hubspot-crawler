@@ -6,9 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Python-based web crawler for detecting HubSpot integrations on websites. It applies regex-based signature matching to identify HubSpot tracking scripts, forms, chat, CMS hosting, and other features. The crawler supports both static HTML analysis and dynamic JavaScript rendering via Playwright.
 
-**Status (2025-10-05):** Production ready for large-scale use (10k-100k URLs). All critical bugs fixed. Comprehensive test suite (213 tests, 100% passing).
+**Status (2025-10-05):** Production ready for large-scale use (10k-100k URLs). All critical bugs fixed. Comprehensive test suite (218 tests, 100% passing).
 
 **Recent Major Fixes:**
+- **Phase 7.2 (2025-10-05):** Excel (.xlsx) export support
+  - Added openpyxl optional dependency for Excel export
+  - Handles commas and special characters in text fields without issues
+  - Preserves data types (booleans, numbers, strings)
+  - Bold headers in first row
+  - 5 comprehensive tests for Excel output
+  - Usage: `--output-format xlsx --out results.xlsx`
 - **Phase 7.1 (2025-10-05):** HTTP error URL handling fix
   - Fixed bug where 4xx/5xx responses set `final_url` to normalized URL instead of `original_url`
   - Now `final_url = original_url` for all HTTP error responses (status >= 400)
@@ -75,9 +82,14 @@ python -m playwright install chromium
 # Basic install
 pip install .
 
-# With optional dependencies (validation + rendering)
-pip install '.[render,validate]'
+# With optional dependencies (validation + rendering + Excel)
+pip install '.[render,validate,excel]'
 python -m playwright install chromium
+
+# Install specific optional features
+pip install '.[excel]'     # Excel export support
+pip install '.[validate]'  # Schema validation
+pip install '.[render]'    # Playwright rendering
 ```
 
 ### Running the crawler
@@ -113,6 +125,17 @@ hubspot-crawl --input urls.txt --out results.jsonl \
 
 # Quiet mode (no progress, errors only)
 hubspot-crawl --input urls.txt --out results.jsonl --quiet
+
+# Export to CSV format
+hubspot-crawl --input urls.txt --out results.csv --output-format csv
+
+# Export to Excel format (handles commas in fields, better data types)
+hubspot-crawl --input urls.txt --out results.xlsx --output-format xlsx
+
+# Excel export with all features
+pip install '.[excel]'  # Install Excel support first
+hubspot-crawl --input urls.txt --out results.xlsx --output-format xlsx \
+  --checkpoint checkpoint.txt --max-retries 3 --concurrency 20
 ```
 
 ## Architecture

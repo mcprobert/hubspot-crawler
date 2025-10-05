@@ -530,6 +530,52 @@ async def csv_writer_worker(queue: asyncio.Queue, output_file: Optional[str]):
         if f:
             f.close()
 
+async def excel_writer_worker(queue: asyncio.Queue, output_file: str):
+    """Excel writer coroutine that writes flattened results to .xlsx format."""
+    try:
+        import openpyxl
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+    except ImportError:
+        raise RuntimeError("openpyxl not installed. Install with: pip install 'hubspot-crawler[excel]' or pip install openpyxl")
+
+    # Create workbook and worksheet
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "HubSpot Detection Results"
+
+    # Field names in order (19 columns total)
+    fieldnames = [
+        "original_url", "final_url", "timestamp", "hubspot_detected", "tracking", "cms_hosting", "confidence",
+        "forms", "chat", "ctas_legacy", "meetings", "video", "email_tracking",
+        "hub_ids", "hub_id_count", "evidence_count", "http_status", "page_title", "page_description"
+    ]
+
+    # Write headers
+    ws.append(fieldnames)
+
+    # Make header row bold
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    try:
+        while True:
+            item = await queue.get()
+
+            # Poison pill signals shutdown
+            if item is None:
+                break
+
+            # Flatten and convert to row
+            flat_row = flatten_result_for_csv(item)
+            row_values = [flat_row.get(field, "") for field in fieldnames]
+            ws.append(row_values)
+
+            queue.task_done()
+    finally:
+        # Save workbook
+        wb.save(output_file)
+
 async def writer_worker(queue: asyncio.Queue, output_file: Optional[str], pretty: bool = False):
     """Single writer coroutine that drains queue and writes to file or stdout.
     Eliminates file write race condition by centralizing all writes."""
@@ -572,6 +618,10 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
     # Start single writer task (choose format based on output_format parameter)
     if output_format == "csv":
         writer_task = asyncio.create_task(csv_writer_worker(result_queue, output))
+    elif output_format == "xlsx":
+        if not output:
+            raise ValueError("Excel format (xlsx) requires --out parameter (cannot write to stdout)")
+        writer_task = asyncio.create_task(excel_writer_worker(result_queue, output))
     else:
         writer_task = asyncio.create_task(writer_worker(result_queue, output, pretty))
 

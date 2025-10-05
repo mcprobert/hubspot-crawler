@@ -1,8 +1,8 @@
 # HubSpot Crawler - Development Status
 
 **Last Updated:** 2025-10-05
-**Version:** 1.5.1 (Phase 1-7.1 Complete)
-**Status:** ✅ Production Ready - Large-Scale Capable (213/213 tests passing, 94% detector coverage)
+**Version:** 1.5.2 (Phase 1-7.2 Complete)
+**Status:** ✅ Production Ready - Large-Scale Capable (218/218 tests passing, 94% detector coverage)
 **GitHub:** https://github.com/mcprobert/hubspot-crawler
 
 ---
@@ -21,6 +21,47 @@ Python-based web crawler for detecting HubSpot integrations on websites. Identif
 ---
 
 ## 📊 Development Progress
+
+### Phase 7.2: Excel Export Support ✅ COMPLETE
+**Status:** Feature addition - Excel (.xlsx) output format
+**Completed:** 2025-10-05
+**Tests:** 218/218 passing (added 5 Excel tests)
+
+**Feature:** Added Excel export support to handle commas and special characters in text fields (page titles, descriptions) more robustly than CSV.
+
+**Implementation:**
+- Added `openpyxl>=3.1.0` as optional dependency in `excel` group
+- Created `excel_writer_worker()` function in crawler.py:533-577
+- Updated `run()` function to route to Excel writer for `--output-format xlsx`
+- Updated CLI to accept "xlsx" as output format choice
+- Proper data type preservation (booleans as TRUE/FALSE, numbers as integers)
+- Bold header row in Excel output
+
+**Usage:**
+```bash
+# Install Excel support
+pip install '.[excel]'
+
+# Export to Excel
+hubspot-crawl --input urls.txt --out results.xlsx --output-format xlsx
+```
+
+**Testing:**
+- 5 comprehensive tests in test_excel_output.py
+- Test file creation and structure
+- Test commas in page_title and page_description fields
+- Test boolean data type preservation
+- Test multiple rows
+- Test openpyxl import error handling
+
+**Benefits:**
+✅ No comma/quote escaping issues
+✅ Professional format (opens directly in Excel/LibreOffice)
+✅ Proper data types
+✅ Handles special characters without issues
+✅ Optional dependency (doesn't affect base installation)
+
+---
 
 ### Phase 7.1: URL Schema Fix ✅ COMPLETE
 **Status:** Bug fix for HTTP error responses
