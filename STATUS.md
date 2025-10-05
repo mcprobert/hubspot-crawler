@@ -1,7 +1,7 @@
 # HubSpot Crawler - Development Status
 
 **Last Updated:** 2025-10-05
-**Version:** 1.6.0 (Phase 1-7.3 Complete)
+**Version:** 1.6.1 (Phase 1-7.3 Complete)
 **Status:** ✅ Production Ready - Enterprise-Scale Capable (239/239 tests passing, 94% detector coverage)
 **GitHub:** https://github.com/mcprobert/hubspot-crawler
 
