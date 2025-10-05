@@ -46,11 +46,12 @@ class TestFetchHTML:
         respx.get(url).mock(return_value=httpx.Response(200, text=html_content))
 
         async with httpx.AsyncClient() as client:
-            html, headers, status_code = await fetch_html(client, url)
+            html, headers, status_code, final_url = await fetch_html(client, url)
 
         assert html == html_content
         assert isinstance(headers, dict)
         assert status_code == 200
+        assert final_url == url
 
     @respx.mock
     async def test_4xx_error_returns_body(self):
@@ -61,11 +62,12 @@ class TestFetchHTML:
         respx.get(url).mock(return_value=httpx.Response(404, text=error_html))
 
         async with httpx.AsyncClient() as client:
-            html, headers, status_code = await fetch_html(client, url)
+            html, headers, status_code, final_url = await fetch_html(client, url)
 
         # Should return the error page HTML, not raise
         assert html == error_html
         assert status_code == 404
+        assert final_url == url
 
     @respx.mock
     async def test_5xx_error_returns_body(self):
@@ -76,7 +78,7 @@ class TestFetchHTML:
         respx.get(url).mock(return_value=httpx.Response(500, text=error_html))
 
         async with httpx.AsyncClient() as client:
-            html, headers, status_code = await fetch_html(client, url)
+            html, headers, status_code, final_url = await fetch_html(client, url)
 
         # Should return the error page HTML
         assert html == error_html
@@ -125,9 +127,9 @@ class TestProcessURL:
         respx.get(url).mock(return_value=httpx.Response(200, text=html))
 
         async with httpx.AsyncClient() as client:
-            result = await process_url(url, client, render=False, validate=False)
+            result = await process_url(url, url, client, render=False, validate=False)
 
-        assert result["url"] == url
+        assert result["original_url"] == url
         assert "hubIds" in result
         assert 12345 in result["hubIds"]
         assert result["summary"]["tracking"] is True
@@ -149,7 +151,7 @@ class TestProcessURL:
         respx.get(url).mock(return_value=httpx.Response(200, text=html))
 
         async with httpx.AsyncClient() as client:
-            result = await process_url(url, client, render=False, validate=False)
+            result = await process_url(url, url, client, render=False, validate=False)
 
         assert result["summary"]["cmsHosting"] is True
         assert result["summary"]["confidence"] == "moderate"
@@ -167,7 +169,7 @@ class TestProcessURL:
         respx.get(url).mock(return_value=httpx.Response(200, text=html, headers=headers))
 
         async with httpx.AsyncClient() as client:
-            result = await process_url(url, client, render=False, validate=False)
+            result = await process_url(url, url, client, render=False, validate=False)
 
         # Should detect hubspotutk cookie
         cookie_evidence = [e for e in result["evidence"] if e["category"] == "cookies" and "hubspotutk" in e["match"].lower()]
@@ -183,7 +185,7 @@ class TestProcessURL:
         respx.get(url).mock(return_value=httpx.Response(200, text=html))
 
         async with httpx.AsyncClient() as client:
-            result = await process_url(url, client, render=False, validate=False)
+            result = await process_url(url, url, client, render=False, validate=False)
 
         assert result["summary"]["tracking"] is False
         assert result["summary"]["cmsHosting"] is False
@@ -206,7 +208,7 @@ class TestProcessURL:
         respx.get(url).mock(return_value=httpx.Response(200, text=html))
 
         async with httpx.AsyncClient() as client:
-            result = await process_url(url, client, render=False, validate=False)
+            result = await process_url(url, url, client, render=False, validate=False)
 
         # Should detect tracking from script resource
         tracking_evidence = [e for e in result["evidence"] if e["category"] == "tracking"]
@@ -229,7 +231,7 @@ class TestProcessURL:
         respx.get(url).mock(return_value=httpx.Response(200, text=html))
 
         async with httpx.AsyncClient() as client:
-            result = await process_url(url, client, render=False, validate=False)
+            result = await process_url(url, url, client, render=False, validate=False)
 
         # Should deduplicate (same category, patternId, source, match)
         tracking_evidence = [e for e in result["evidence"]
@@ -246,7 +248,7 @@ class TestProcessURL:
 
         async with httpx.AsyncClient() as client:
             with pytest.raises(RuntimeError, match="Failed to fetch"):
-                await process_url(url, client, render=False, validate=False)
+                await process_url(url, url, client, render=False, validate=False)
 
 
 @pytest.mark.asyncio
@@ -266,7 +268,7 @@ class TestCookieDetection:
         respx.get(url).mock(return_value=httpx.Response(200, text=html, headers=headers))
 
         async with httpx.AsyncClient() as client:
-            result = await process_url(url, client, render=False, validate=False)
+            result = await process_url(url, url, client, render=False, validate=False)
 
         cookie_evidence = [e for e in result["evidence"] if "hubspotutk" in e["match"].lower()]
         assert len(cookie_evidence) >= 1
@@ -285,7 +287,7 @@ class TestCookieDetection:
         respx.get(url).mock(return_value=httpx.Response(200, text=html, headers=headers))
 
         async with httpx.AsyncClient() as client:
-            result = await process_url(url, client, render=False, validate=False)
+            result = await process_url(url, url, client, render=False, validate=False)
 
         cookie_evidence = [e for e in result["evidence"] if e["category"] == "cookies" and "__hstc" in e["match"]]
         if cookie_evidence:
@@ -306,7 +308,7 @@ class TestCookieDetection:
         respx.get(url).mock(return_value=httpx.Response(200, text=html, headers=headers))
 
         async with httpx.AsyncClient() as client:
-            result = await process_url(url, client, render=False, validate=False)
+            result = await process_url(url, url, client, render=False, validate=False)
 
         cookie_evidence = [e for e in result["evidence"] if e["category"] == "cookies"]
         # Should detect both cookies

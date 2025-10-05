@@ -235,7 +235,7 @@ def summarise(evidence: List[Evidence]) -> dict:
         "confidence": confidence
     }
 
-def make_result(url: str, evidence: List[Evidence], headers: Optional[dict] = None,
+def make_result(original_url: str, final_url: str, evidence: List[Evidence], headers: Optional[dict] = None,
                 http_status: Optional[int] = None, page_metadata: Optional[dict] = None) -> dict:
     hub_ids = []
     for e in evidence:
@@ -252,7 +252,8 @@ def make_result(url: str, evidence: List[Evidence], headers: Optional[dict] = No
     )
 
     result = {
-        "url": url,
+        "original_url": original_url,
+        "final_url": final_url,
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "hubspot_detected": hubspot_detected,
         "hubIds": hub_ids,

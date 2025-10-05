@@ -24,11 +24,11 @@ class TestFlattenResultForCSV:
     def test_basic_flattening(self):
         """Should flatten a basic result structure"""
         evidence = []
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
-        assert flat["url"] == "https://example.com"
+        assert flat["original_url"] == "https://example.com"
         assert "timestamp" in flat
         assert flat["hubspot_detected"] is False
         assert flat["tracking"] is False
@@ -44,7 +44,7 @@ class TestFlattenResultForCSV:
             "hubId": 123,
             "confidence": "definitive"
         }]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
@@ -63,7 +63,7 @@ class TestFlattenResultForCSV:
             "hubId": 123,
             "confidence": "definitive"
         }]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
@@ -90,7 +90,7 @@ class TestFlattenResultForCSV:
                 "confidence": "strong"
             }
         ]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
@@ -100,7 +100,7 @@ class TestFlattenResultForCSV:
     def test_hub_ids_empty(self):
         """Empty Hub IDs should be empty string"""
         evidence = []
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
@@ -110,7 +110,7 @@ class TestFlattenResultForCSV:
     def test_all_features_present(self):
         """All feature columns should be present"""
         evidence = []
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
@@ -141,7 +141,7 @@ class TestFlattenResultForCSV:
                 "confidence": "definitive"
             }
         ]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
@@ -156,7 +156,7 @@ class TestFlattenResultForCSV:
             {"category": "cms", "patternId": "test2", "match": "m2", "source": "html", "hubId": None, "confidence": "strong"},
             {"category": "forms", "patternId": "test3", "match": "m3", "source": "html", "hubId": None, "confidence": "strong"}
         ]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
@@ -165,7 +165,7 @@ class TestFlattenResultForCSV:
     def test_http_status_present(self):
         """HTTP status should be included when provided"""
         evidence = []
-        result = make_result("https://example.com", evidence, http_status=200)
+        result = make_result("https://example.com", "https://example.com", evidence, http_status=200)
 
         flat = flatten_result_for_csv(result)
 
@@ -174,7 +174,7 @@ class TestFlattenResultForCSV:
     def test_http_status_missing(self):
         """HTTP status should be empty string when not provided"""
         evidence = []
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
@@ -184,7 +184,7 @@ class TestFlattenResultForCSV:
         """Page metadata should be included when provided"""
         evidence = []
         metadata = {"title": "Test Page", "description": "Test description"}
-        result = make_result("https://example.com", evidence, page_metadata=metadata)
+        result = make_result("https://example.com", "https://example.com", evidence, page_metadata=metadata)
 
         flat = flatten_result_for_csv(result)
 
@@ -195,7 +195,7 @@ class TestFlattenResultForCSV:
         """Should handle null metadata values"""
         evidence = []
         metadata = {"title": None, "description": None}
-        result = make_result("https://example.com", evidence, page_metadata=metadata)
+        result = make_result("https://example.com", "https://example.com", evidence, page_metadata=metadata)
 
         flat = flatten_result_for_csv(result)
 
@@ -205,7 +205,7 @@ class TestFlattenResultForCSV:
     def test_page_metadata_missing(self):
         """Should handle missing page_metadata"""
         evidence = []
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
@@ -222,7 +222,7 @@ class TestFlattenResultForCSV:
             "hubId": 123,
             "confidence": "definitive"
         }]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
@@ -231,15 +231,15 @@ class TestFlattenResultForCSV:
     def test_all_expected_columns(self):
         """Should have exactly the expected columns"""
         evidence = []
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         flat = flatten_result_for_csv(result)
 
         expected_columns = [
-            "url", "timestamp", "hubspot_detected", "tracking", "cms_hosting", "confidence",
+            "original_url", "final_url", "timestamp", "hubspot_detected", "tracking", "cms_hosting", "confidence",
             "forms", "chat", "ctas_legacy", "meetings", "video", "email_tracking",
             "hub_ids", "hub_id_count", "evidence_count", "http_status", "page_title", "page_description"
         ]
 
         assert set(flat.keys()) == set(expected_columns)
-        assert len(flat) == 18
+        assert len(flat) == 19  # Was 18, now 19 with two URL fields

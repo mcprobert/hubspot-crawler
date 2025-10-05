@@ -321,23 +321,25 @@ def extract_resource_urls(html: str, base_url: str) -> List[str]:
                 continue
     return list(urls)
 
-async def fetch_html(client: httpx.AsyncClient, url: str) -> Tuple[str, Dict[str, str], int]:
-    """Fetch HTML with error handling. Returns (html, headers, status_code)"""
+async def fetch_html(client: httpx.AsyncClient, url: str) -> Tuple[str, Dict[str, str], int, str]:
+    """Fetch HTML with error handling. Returns (html, headers, status_code, final_url)"""
     try:
         r = await client.get(url, timeout=TIMEOUT, follow_redirects=True)
         r.raise_for_status()  # Raise on 4xx/5xx
         headers = {k: v for k, v in r.headers.items() if k and v}
-        return r.text, headers, r.status_code
+        final_url = str(r.url)  # Capture final URL after redirects
+        return r.text, headers, r.status_code, final_url
     except httpx.HTTPStatusError as e:
         # 4xx/5xx errors - still try to parse body if available
         headers = {k: v for k, v in e.response.headers.items() if k and v}
         status_code = e.response.status_code if e.response else 0
-        return e.response.text if e.response else "", headers, status_code
+        final_url = str(e.response.url) if e.response else url
+        return e.response.text if e.response else "", headers, status_code, final_url
     except (httpx.RequestError, httpx.TimeoutException) as e:
         # Network errors, DNS failures, timeouts
         raise RuntimeError(f"HTTP error fetching {url}: {str(e)}") from e
 
-async def render_with_playwright(url: str, user_agent: str) -> Tuple[str, List[str], Dict[str,str]]:
+async def render_with_playwright(url: str, user_agent: str) -> Tuple[str, List[str], Dict[str,str], str]:
     if not _HAS_PLAYWRIGHT:
         raise RuntimeError("playwright not installed. pip install playwright && playwright install chromium")
     network: List[str] = []
@@ -350,33 +352,43 @@ async def render_with_playwright(url: str, user_agent: str) -> Tuple[str, List[s
         resp = await page.goto(url, wait_until="load", timeout=30000)
         html = await page.content()
         headers = {}
+        final_url = url  # Default to original if no response
         if resp:
             headers = {k: v for k, v in resp.headers.items()}
+            final_url = page.url  # Get final URL after redirects
         # wait a bit for late beacons
         await page.wait_for_timeout(1500)
         await ctx.close()
         await browser.close()
-    return html, network, headers
+    return html, network, headers, final_url
 
-async def process_url(url: str, client: httpx.AsyncClient, render: bool, validate: bool) -> dict:
-    """Process a URL and return detection results. Raises on fatal errors."""
-    url = normalize_url(url)
+async def process_url(original_url: str, url: str, client: httpx.AsyncClient, render: bool, validate: bool) -> dict:
+    """Process a URL and return detection results. Raises on fatal errors.
+
+    Args:
+        original_url: The exact URL from the input file (before normalization)
+        url: The normalized URL to actually fetch
+        client: httpx client
+        render: Whether to use Playwright rendering
+        validate: Whether to validate against schema
+    """
     html = ""
     headers: Dict[str,str] = {}
     status_code = 0
+    final_url = url  # Default to normalized URL
     network_lines: List[str] = []
 
     try:
         if render and _HAS_PLAYWRIGHT:
             try:
-                html, network_lines, headers = await render_with_playwright(url, client.headers.get("user-agent", DEFAULT_UA))
+                html, network_lines, headers, final_url = await render_with_playwright(url, client.headers.get("user-agent", DEFAULT_UA))
             except Exception as e:
                 # Fall back to static if render fails
                 print(f"Playwright render failed for {url}, falling back to static: {e}", file=sys.stderr)
-                html, headers, status_code = await fetch_html(client, url)
+                html, headers, status_code, final_url = await fetch_html(client, url)
                 network_lines = extract_resource_urls(html, url)
         else:
-            html, headers, status_code = await fetch_html(client, url)
+            html, headers, status_code, final_url = await fetch_html(client, url)
             network_lines = extract_resource_urls(html, url)
     except Exception as e:
         # Fatal HTTP/network error - re-raise with context
@@ -425,7 +437,7 @@ async def process_url(url: str, client: httpx.AsyncClient, render: bool, validat
     # Extract page metadata
     page_metadata = extract_page_metadata(html)
 
-    result = make_result(url, ev, headers=headers, http_status=status_code, page_metadata=page_metadata)
+    result = make_result(original_url, final_url, ev, headers=headers, http_status=status_code, page_metadata=page_metadata)
 
     if validate and _HAS_JSONSCHEMA:
         import importlib.resources as pkg_resources
@@ -451,7 +463,8 @@ def flatten_result_for_csv(result: dict) -> dict:
     hub_ids_str = ",".join(str(hid) for hid in hub_ids) if hub_ids else ""
 
     return {
-        "url": result.get("url", ""),
+        "original_url": result.get("original_url", ""),
+        "final_url": result.get("final_url", ""),
         "timestamp": result.get("timestamp", ""),
         "hubspot_detected": result.get("hubspot_detected", False),
         "tracking": summary.get("tracking", False),
@@ -475,9 +488,9 @@ async def csv_writer_worker(queue: asyncio.Queue, output_file: Optional[str]):
     """CSV writer coroutine that writes flattened results to CSV format."""
     import csv
 
-    # CSV field names in order
+    # CSV field names in order (19 columns total)
     fieldnames = [
-        "url", "timestamp", "hubspot_detected", "tracking", "cms_hosting", "confidence",
+        "original_url", "final_url", "timestamp", "hubspot_detected", "tracking", "cms_hosting", "confidence",
         "forms", "chat", "ctas_legacy", "meetings", "video", "email_tracking",
         "hub_ids", "hub_id_count", "evidence_count", "http_status", "page_title", "page_description"
     ]
@@ -599,7 +612,12 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
             sem = asyncio.Semaphore(concurrency)
 
             async def try_url_with_retries(url_to_try: str, original_url: str) -> Optional[dict]:
-                """Try a URL with retry logic. Returns result on success, None on failure."""
+                """Try a URL with retry logic. Returns result on success, None on failure.
+
+                Args:
+                    url_to_try: The URL to actually fetch (normalized or variation)
+                    original_url: The exact original URL from input (preserved for result)
+                """
                 last_exception = None
                 last_status_code = None
 
@@ -614,7 +632,7 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
 
                         # Acquire domain semaphore to ensure max_per_domain limit
                         async with domain_sem:
-                            res = await process_url(url_to_try, client, render, validate)
+                            res = await process_url(original_url, url_to_try, client, render, validate)
                             return res  # Success
 
                     except Exception as e:
@@ -652,11 +670,18 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                 return None  # All retries failed
 
             async def worker(u: str):
-                """Worker that processes a single URL with retry logic and optional URL variations"""
+                """Worker that processes a single URL with retry logic and optional URL variations
+
+                Args:
+                    u: The raw input URL from the file (before any normalization)
+                """
 
                 async with sem:
-                    # Try original URL first
-                    result = await try_url_with_retries(u, u)
+                    # Normalize URL for fetching, but preserve original for tracking
+                    normalized = normalize_url(u)
+
+                    # Try normalized URL first, passing original u for result tracking
+                    result = await try_url_with_retries(normalized, u)
 
                     if result is not None:
                         # Original URL succeeded
@@ -684,23 +709,18 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
 
                         return  # Success
 
-                    # Original URL failed - try variations if enabled
+                    # Normalized URL failed - try variations if enabled
                     if try_variations:
-                        variations = generate_url_variations(u, max_variations)
+                        variations = generate_url_variations(normalized, max_variations)
 
                         if variations:
-                            print(f"Original URL failed, trying {len(variations)} variation(s) for {u}", file=sys.stderr)
+                            print(f"Normalized URL failed, trying {len(variations)} variation(s) for {u}", file=sys.stderr)
 
                         for variation_url in variations:
                             result = await try_url_with_retries(variation_url, u)
 
                             if result is not None:
-                                # Variation succeeded - add metadata
-                                result["url_variation"] = {
-                                    "original_url": u,
-                                    "working_url": variation_url,
-                                    "variation_type": "auto"
-                                }
+                                # Variation succeeded
                                 print(f"Success with variation: {variation_url} (original: {u})", file=sys.stderr)
                                 await result_queue.put(result)
 
@@ -741,14 +761,33 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                                 print(tracker.get_compact_status(), file=sys.stderr)
 
                     # Log error and put error result on both queues
-                    attempted_urls = [u]
+                    attempted_urls = [normalize_url(u)]
                     if try_variations:
-                        attempted_urls.extend(generate_url_variations(u, max_variations))
+                        attempted_urls.extend(generate_url_variations(normalize_url(u), max_variations))
 
+                    # Create failure result with same schema as success results
                     err = {
-                        "url": u,
-                        "error": "Failed after all retry attempts" + (f" and {len(attempted_urls) - 1} URL variations" if try_variations else ""),
+                        "original_url": u,                    # Raw input URL
+                        "final_url": u,                       # Same as original (no successful fetch)
                         "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "hubspot_detected": False,            # No detection occurred
+                        "hubIds": [],                         # No Hub IDs found
+                        "summary": {                          # Empty summary
+                            "tracking": False,
+                            "cmsHosting": False,
+                            "features": {
+                                "forms": False,
+                                "chat": False,
+                                "ctasLegacy": False,
+                                "meetings": False,
+                                "video": False,
+                                "emailTrackingIndicators": False
+                            },
+                            "confidence": "weak"
+                        },
+                        "evidence": [],                       # No evidence
+                        "headers": {},                        # No headers
+                        "error": "Failed after all retry attempts" + (f" and {len(attempted_urls) - 1} URL variations" if try_variations else ""),
                         "attempts": max_retries,
                         "attempted_urls": attempted_urls
                     }

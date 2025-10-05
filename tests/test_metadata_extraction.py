@@ -148,7 +148,8 @@ class TestMakeResultWithMetadata:
     def test_make_result_with_http_status(self):
         """Should include http_status when provided"""
         result = make_result(
-            url="https://example.com",
+            original_url="https://example.com",
+            final_url="https://example.com",
             evidence=[],
             http_status=200
         )
@@ -158,7 +159,8 @@ class TestMakeResultWithMetadata:
         """Should include page_metadata when provided"""
         metadata = {"title": "Test", "description": "Desc"}
         result = make_result(
-            url="https://example.com",
+            original_url="https://example.com",
+            final_url="https://example.com",
             evidence=[],
             page_metadata=metadata
         )
@@ -170,7 +172,8 @@ class TestMakeResultWithMetadata:
         """Should include both new fields when provided"""
         metadata = {"title": "Test", "description": "Desc"}
         result = make_result(
-            url="https://example.com",
+            original_url="https://example.com",
+            final_url="https://example.com",
             evidence=[],
             http_status=200,
             page_metadata=metadata
@@ -181,7 +184,8 @@ class TestMakeResultWithMetadata:
     def test_make_result_without_new_fields(self):
         """Should work without new fields (backward compatibility)"""
         result = make_result(
-            url="https://example.com",
+            original_url="https://example.com",
+            final_url="https://example.com",
             evidence=[]
         )
         # New fields should not be present when not provided
@@ -191,7 +195,8 @@ class TestMakeResultWithMetadata:
     def test_make_result_with_none_http_status(self):
         """Should not include http_status when None"""
         result = make_result(
-            url="https://example.com",
+            original_url="https://example.com",
+            final_url="https://example.com",
             evidence=[],
             http_status=None
         )
@@ -200,7 +205,8 @@ class TestMakeResultWithMetadata:
     def test_make_result_with_none_page_metadata(self):
         """Should not include page_metadata when None"""
         result = make_result(
-            url="https://example.com",
+            original_url="https://example.com",
+            final_url="https://example.com",
             evidence=[],
             page_metadata=None
         )
@@ -209,7 +215,8 @@ class TestMakeResultWithMetadata:
     def test_make_result_with_4xx_status(self):
         """Should handle 4xx status codes"""
         result = make_result(
-            url="https://example.com",
+            original_url="https://example.com",
+            final_url="https://example.com",
             evidence=[],
             http_status=404
         )
@@ -218,7 +225,8 @@ class TestMakeResultWithMetadata:
     def test_make_result_with_5xx_status(self):
         """Should handle 5xx status codes"""
         result = make_result(
-            url="https://example.com",
+            original_url="https://example.com",
+            final_url="https://example.com",
             evidence=[],
             http_status=500
         )
@@ -236,7 +244,8 @@ class TestMakeResultWithMetadata:
         }]
         metadata = {"title": "Test", "description": "Desc"}
         result = make_result(
-            url="https://example.com",
+            original_url="https://example.com",
+            final_url="https://example.com",
             evidence=evidence,
             headers={"content-type": "text/html"},
             http_status=200,
@@ -244,7 +253,8 @@ class TestMakeResultWithMetadata:
         )
 
         # Check existing fields are present
-        assert result["url"] == "https://example.com"
+        assert result["original_url"] == "https://example.com"
+        assert result["final_url"] == "https://example.com"
         assert "timestamp" in result
         assert result["hubIds"] == [123]
         assert "summary" in result

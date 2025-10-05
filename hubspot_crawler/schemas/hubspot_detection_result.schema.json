@@ -3,15 +3,22 @@
   "title": "HubSpotDetectionResult",
   "type": "object",
   "required": [
-    "url",
+    "original_url",
+    "final_url",
     "timestamp",
     "summary",
     "evidence"
   ],
   "properties": {
-    "url": {
+    "original_url": {
       "type": "string",
-      "format": "uri"
+      "format": "uri",
+      "description": "The exact URL from the input file, before any normalization or transformations"
+    },
+    "final_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "The final URL that was actually analyzed, after redirects and transformations"
     },
     "timestamp": {
       "type": "string",

@@ -26,7 +26,7 @@ class TestHubSpotDetectedFlag:
             "hubId": 123,
             "confidence": "definitive"
         }]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubspot_detected"] is True
         assert result["summary"]["tracking"] is True
@@ -41,7 +41,7 @@ class TestHubSpotDetectedFlag:
             "hubId": None,
             "confidence": "strong"
         }]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubspot_detected"] is True
         assert result["summary"]["cmsHosting"] is True
@@ -56,7 +56,7 @@ class TestHubSpotDetectedFlag:
             "hubId": None,
             "confidence": "strong"
         }]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubspot_detected"] is True
         assert result["summary"]["features"]["forms"] is True
@@ -71,7 +71,7 @@ class TestHubSpotDetectedFlag:
             "hubId": None,
             "confidence": "definitive"
         }]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubspot_detected"] is True
         assert result["summary"]["features"]["chat"] is True
@@ -86,7 +86,7 @@ class TestHubSpotDetectedFlag:
             "hubId": None,
             "confidence": "strong"
         }]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubspot_detected"] is True
         assert result["summary"]["features"]["video"] is True
@@ -101,7 +101,7 @@ class TestHubSpotDetectedFlag:
             "hubId": None,
             "confidence": "strong"
         }]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubspot_detected"] is True
         assert result["summary"]["features"]["meetings"] is True
@@ -109,7 +109,7 @@ class TestHubSpotDetectedFlag:
     def test_false_when_no_hubspot(self):
         """hubspot_detected should be False when no HubSpot is detected"""
         evidence = []
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubspot_detected"] is False
         assert result["summary"]["tracking"] is False
@@ -144,7 +144,7 @@ class TestHubSpotDetectedFlag:
                 "confidence": "strong"
             }
         ]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubspot_detected"] is True
         assert result["summary"]["tracking"] is True
@@ -161,7 +161,7 @@ class TestHubSpotDetectedFlag:
             "hubId": 123,
             "confidence": "definitive"
         }]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         # Check it's at top level
         assert "hubspot_detected" in result
@@ -173,14 +173,14 @@ class TestHubSpotDetectedFlag:
     def test_with_real_html_tracking(self, sample_html_with_tracking):
         """Test hubspot_detected with real HTML containing tracking"""
         evidence = detect_html(sample_html_with_tracking)
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubspot_detected"] is True
 
     def test_with_real_html_forms(self, sample_html_forms_complete):
         """Test hubspot_detected with real HTML containing forms"""
         evidence = detect_html(sample_html_forms_complete)
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubspot_detected"] is True
 
@@ -188,6 +188,6 @@ class TestHubSpotDetectedFlag:
         """Test hubspot_detected with clean HTML (no HubSpot)"""
         html = "<html><head><title>Clean Page</title></head><body>No HubSpot</body></html>"
         evidence = detect_html(html)
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubspot_detected"] is False

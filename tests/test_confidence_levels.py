@@ -96,7 +96,7 @@ class TestConfidenceLevels:
     def test_make_result_includes_confidence(self, sample_html_with_tracking):
         """make_result should include confidence in summary."""
         evidence = detect_html(sample_html_with_tracking)
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert "summary" in result
         assert "confidence" in result["summary"]
@@ -105,7 +105,7 @@ class TestConfidenceLevels:
     def test_make_result_includes_hub_ids(self, sample_html_with_tracking):
         """make_result should extract Hub IDs from evidence."""
         evidence = detect_html(sample_html_with_tracking)
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert "hubIds" in result
         assert isinstance(result["hubIds"], list)
@@ -120,7 +120,7 @@ class TestConfidenceLevels:
             {"category": "tracking", "patternId": "analytics_core", "match": "12345.js",
              "source": "html", "hubId": 12345, "confidence": "strong", "context": None}
         ]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         assert result["hubIds"] == [12345], "Should deduplicate Hub IDs"
 
@@ -179,7 +179,7 @@ class TestEdgeCases:
 
     def test_make_result_with_no_evidence(self):
         """make_result should handle empty evidence."""
-        result = make_result("https://example.com", [])
+        result = make_result("https://example.com", "https://example.com", [])
 
         assert result["hubIds"] == []
         assert result["summary"]["confidence"] == "weak"
@@ -192,7 +192,7 @@ class TestEdgeCases:
             {"category": "tracking", "patternId": "tracking_loader_script", "match": "test",
              "source": "html", "hubId": "not-a-number", "confidence": "definitive", "context": None}
         ]
-        result = make_result("https://example.com", evidence)
+        result = make_result("https://example.com", "https://example.com", evidence)
 
         # Should filter out non-integer Hub IDs
         assert result["hubIds"] == [] or all(isinstance(h, int) for h in result["hubIds"])

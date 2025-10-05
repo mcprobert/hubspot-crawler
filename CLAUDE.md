@@ -6,9 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Python-based web crawler for detecting HubSpot integrations on websites. It applies regex-based signature matching to identify HubSpot tracking scripts, forms, chat, CMS hosting, and other features. The crawler supports both static HTML analysis and dynamic JavaScript rendering via Playwright.
 
-**Status (2025-10-04):** Production ready for large-scale use (10k-100k URLs). All critical bugs fixed. Comprehensive test suite (137 tests, 100% passing).
+**Status (2025-10-05):** Production ready for large-scale use (10k-100k URLs). All critical bugs fixed. Comprehensive test suite (211 tests, 100% passing).
 
 **Recent Major Fixes:**
+- **Phase 7 (2025-10-05):** Dual URL tracking (original_url + final_url)
+  - Tracks both input URL and final analyzed URL (after redirects/normalization)
+  - Enables matching results back to original dataset
+  - Breaking schema change: replaced single `url` field with `original_url` and `final_url`
+  - Failure handling uses same schema structure as success results
+  - 5 comprehensive tests for failure scenarios
+  - CSV output updated with 19 columns (was 18)
 - **Phase 5.5 (2025-10-04):** Enhanced progress reporting
   - Real-time HubSpot detection statistics (tracking, CMS, forms, chat, etc.)
   - Performance metrics (URLs/sec, elapsed time, ETA)
@@ -200,8 +207,9 @@ Results are emitted as JSON conforming to `hubspot_detection_result.schema.json`
 
 ```json
 {
-  "url": "https://example.com",
-  "timestamp": "2025-10-04T12:34:56Z",
+  "original_url": "example.com",
+  "final_url": "https://www.example.com",
+  "timestamp": "2025-10-05T12:34:56Z",
   "hubIds": [123456],
   "summary": {
     "tracking": true,
@@ -226,7 +234,12 @@ Results are emitted as JSON conforming to `hubspot_detection_result.schema.json`
 }
 ```
 
-**Note:** The `url_variation` field is optional and only present when the `--try-variations` flag is used and a URL variation succeeded instead of the original URL.
+**Important Schema Fields (v1.5.0):**
+- `original_url`: The exact URL from the input file, before any normalization or transformations
+- `final_url`: The final URL that was actually analyzed, after redirects and transformations
+- `url_variation`: Optional field only present when `--try-variations` flag is used and a URL variation succeeded instead of the original URL
+
+**Failure Handling:** When all URL attempts fail, both `original_url` and `final_url` are set to the input URL, and the result includes an `error` field with failure details.
 
 ## Configuration & Behavior
 
