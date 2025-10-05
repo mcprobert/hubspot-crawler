@@ -39,8 +39,15 @@ htmlcov/
 # Output files
 *.jsonl
 *.csv
+*.xlsx
 stress_test_*.txt
 test_*.txt
 test_*.jsonl
 results.*
 checkpoint_*.json
+checkpoint*.txt
+failures*.jsonl
+
+# URL input files (protect user data)
+urls.txt
+*_urls.txt
