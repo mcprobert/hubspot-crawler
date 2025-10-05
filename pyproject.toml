@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hubspot-crawler"
-version = "1.5.0"
+version = "1.5.1"
 description = "Public-web HubSpot detection crawler (static + optional headless)"
 authors = [{name="Whitehat SEO"}]
 readme = "README.md"

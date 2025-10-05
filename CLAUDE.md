@@ -6,9 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Python-based web crawler for detecting HubSpot integrations on websites. It applies regex-based signature matching to identify HubSpot tracking scripts, forms, chat, CMS hosting, and other features. The crawler supports both static HTML analysis and dynamic JavaScript rendering via Playwright.
 
-**Status (2025-10-05):** Production ready for large-scale use (10k-100k URLs). All critical bugs fixed. Comprehensive test suite (211 tests, 100% passing).
+**Status (2025-10-05):** Production ready for large-scale use (10k-100k URLs). All critical bugs fixed. Comprehensive test suite (213 tests, 100% passing).
 
 **Recent Major Fixes:**
+- **Phase 7.1 (2025-10-05):** HTTP error URL handling fix
+  - Fixed bug where 4xx/5xx responses set `final_url` to normalized URL instead of `original_url`
+  - Now `final_url = original_url` for all HTTP error responses (status >= 400)
+  - Ensures proper dataset correlation for failed URLs
+  - Added 2 tests for 4xx/5xx behavior
+  - Updated `render_with_playwright()` to return status_code
 - **Phase 7 (2025-10-05):** Dual URL tracking (original_url + final_url)
   - Tracks both input URL and final analyzed URL (after redirects/normalization)
   - Enables matching results back to original dataset

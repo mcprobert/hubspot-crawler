@@ -1,8 +1,8 @@
 # HubSpot Crawler - Development Status
 
 **Last Updated:** 2025-10-05
-**Version:** 1.5.0 (Phase 1-7 Complete)
-**Status:** ✅ Production Ready - Large-Scale Capable (211/211 tests passing, 94% detector coverage)
+**Version:** 1.5.1 (Phase 1-7.1 Complete)
+**Status:** ✅ Production Ready - Large-Scale Capable (213/213 tests passing, 94% detector coverage)
 **GitHub:** https://github.com/mcprobert/hubspot-crawler
 
 ---
@@ -21,6 +21,32 @@ Python-based web crawler for detecting HubSpot integrations on websites. Identif
 ---
 
 ## 📊 Development Progress
+
+### Phase 7.1: URL Schema Fix ✅ COMPLETE
+**Status:** Bug fix for HTTP error responses
+**Completed:** 2025-10-05
+**Tests:** 213/213 passing
+
+**Issue:** When URLs returned 4xx/5xx HTTP errors, `final_url` was set to the normalized URL instead of `original_url`, breaking dataset correlation.
+
+**Example Bug:**
+```
+Input: qsfjg.co.uk
+Output: original_url=qsfjg.co.uk, final_url=https://qsfjg.co.uk (404)
+Expected: Both should be qsfjg.co.uk
+```
+
+**Fix:** Modified `process_url()` in crawler.py:397-400 to set `final_url = original_url` for all HTTP status codes >= 400.
+
+**Changes:**
+- Added error status check after fetch operations
+- Updated `render_with_playwright()` to return status_code
+- Added 2 comprehensive tests for 4xx/5xx behavior
+- Now 213 tests passing (was 211)
+
+**Result:** For error responses, both URLs now match the original input, enabling proper dataset correlation.
+
+---
 
 ### Phase 1: Critical Bug Fixes ✅ COMPLETE
 **Status:** 8/8 bugs fixed

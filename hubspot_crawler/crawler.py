@@ -339,7 +339,7 @@ async def fetch_html(client: httpx.AsyncClient, url: str) -> Tuple[str, Dict[str
         # Network errors, DNS failures, timeouts
         raise RuntimeError(f"HTTP error fetching {url}: {str(e)}") from e
 
-async def render_with_playwright(url: str, user_agent: str) -> Tuple[str, List[str], Dict[str,str], str]:
+async def render_with_playwright(url: str, user_agent: str) -> Tuple[str, List[str], Dict[str,str], int, str]:
     if not _HAS_PLAYWRIGHT:
         raise RuntimeError("playwright not installed. pip install playwright && playwright install chromium")
     network: List[str] = []
@@ -352,15 +352,17 @@ async def render_with_playwright(url: str, user_agent: str) -> Tuple[str, List[s
         resp = await page.goto(url, wait_until="load", timeout=30000)
         html = await page.content()
         headers = {}
+        status_code = 0
         final_url = url  # Default to original if no response
         if resp:
             headers = {k: v for k, v in resp.headers.items()}
+            status_code = resp.status
             final_url = page.url  # Get final URL after redirects
         # wait a bit for late beacons
         await page.wait_for_timeout(1500)
         await ctx.close()
         await browser.close()
-    return html, network, headers, final_url
+    return html, network, headers, status_code, final_url
 
 async def process_url(original_url: str, url: str, client: httpx.AsyncClient, render: bool, validate: bool) -> dict:
     """Process a URL and return detection results. Raises on fatal errors.
@@ -381,7 +383,7 @@ async def process_url(original_url: str, url: str, client: httpx.AsyncClient, re
     try:
         if render and _HAS_PLAYWRIGHT:
             try:
-                html, network_lines, headers, final_url = await render_with_playwright(url, client.headers.get("user-agent", DEFAULT_UA))
+                html, network_lines, headers, status_code, final_url = await render_with_playwright(url, client.headers.get("user-agent", DEFAULT_UA))
             except Exception as e:
                 # Fall back to static if render fails
                 print(f"Playwright render failed for {url}, falling back to static: {e}", file=sys.stderr)
@@ -393,6 +395,11 @@ async def process_url(original_url: str, url: str, client: httpx.AsyncClient, re
     except Exception as e:
         # Fatal HTTP/network error - re-raise with context
         raise RuntimeError(f"Failed to fetch {url}: {str(e)}") from e
+
+    # For HTTP error responses (4xx/5xx), set final_url = original_url
+    # since we didn't get usable content to analyze
+    if status_code >= 400:
+        final_url = original_url
 
     ev = []
     ev.extend(detect_html(html))

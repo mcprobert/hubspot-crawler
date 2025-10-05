@@ -250,6 +250,40 @@ class TestProcessURL:
             with pytest.raises(RuntimeError, match="Failed to fetch"):
                 await process_url(url, url, client, render=False, validate=False)
 
+    @respx.mock
+    async def test_process_url_4xx_sets_final_url_to_original(self):
+        """For 4xx errors, final_url should equal original_url (not normalized URL)."""
+        original_url = "example.com"
+        normalized_url = "https://example.com"
+        error_html = "<html><body>404 Not Found</body></html>"
+
+        respx.get(normalized_url).mock(return_value=httpx.Response(404, text=error_html))
+
+        async with httpx.AsyncClient() as client:
+            result = await process_url(original_url, normalized_url, client, render=False, validate=False)
+
+        # Both URLs should match the original input when there's a 4xx error
+        assert result["original_url"] == original_url
+        assert result["final_url"] == original_url  # Should equal original, not normalized
+        assert result.get("http_status") == 404
+
+    @respx.mock
+    async def test_process_url_5xx_sets_final_url_to_original(self):
+        """For 5xx errors, final_url should equal original_url (not normalized URL)."""
+        original_url = "example.com"
+        normalized_url = "https://example.com"
+        error_html = "<html><body>500 Internal Server Error</body></html>"
+
+        respx.get(normalized_url).mock(return_value=httpx.Response(500, text=error_html))
+
+        async with httpx.AsyncClient() as client:
+            result = await process_url(original_url, normalized_url, client, render=False, validate=False)
+
+        # Both URLs should match the original input when there's a 5xx error
+        assert result["original_url"] == original_url
+        assert result["final_url"] == original_url  # Should equal original, not normalized
+        assert result.get("http_status") == 500
+
 
 @pytest.mark.asyncio
 class TestCookieDetection:
