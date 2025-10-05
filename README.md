@@ -1,11 +1,12 @@
-# HubSpot Detection Crawler (Python) — v1.4.0
+# HubSpot Detection Crawler (Python) — v1.4.1
 Generated: 2025-10-04
 **Status:** ✅ Production Ready - All Tests Passing
-**Last Updated:** 2025-10-04 (v1.4.0: Ultra-Conservative Default)
+**Last Updated:** 2025-10-05 (v1.4.1: GitHub Release)
 
 This is a **Python** crawler that applies HubSpot web detection signatures and emits structured JSON results. All critical bugs from the initial implementation have been fixed and the crawler has been tested against live sites.
 
-**Recent Updates (2025-10-04):**
+**Recent Updates (2025-10-05):**
+- ✅ **v1.4.1: GitHub release** - Public repository created at https://github.com/mcprobert/hubspot-crawler
 - ✅ **v1.4.0: Ultra-conservative default** - Default mode now takes 3-5 hrs for 10k URLs with virtually zero IP blocking risk (quality over speed)
 - ✅ **Phase 6.7.1: Preset modes** - 4 safety modes (ultra/conservative/balanced/aggressive) for easy configuration
 - ✅ **Phase 6.7: Anti-blocking protection** - Per-domain limiting, request delays with jitter, smart 429/403 detection
