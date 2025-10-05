@@ -6,6 +6,8 @@ import json
 import time
 import random
 import urllib.parse
+import select
+from collections import deque
 from datetime import datetime
 from typing import List, Tuple, Optional, Dict, Any, Set
 
@@ -247,6 +249,123 @@ class ProgressTracker:
         return json.dumps(data)
 
 
+class BlockDetector:
+    """Detects potential IP blocking by tracking failure patterns across multiple domains"""
+
+    def __init__(self, threshold: int = 5, window_size: int = 20):
+        """
+        Initialize block detector.
+
+        Args:
+            threshold: Number of blocking failures to trigger alert
+            window_size: Size of sliding window for tracking attempts
+        """
+        self.threshold = threshold
+        self.window_size = window_size
+        # Track recent attempts: (url, domain, is_blocking, timestamp)
+        self.recent_attempts: deque = deque(maxlen=window_size)
+        # Track failed URLs for potential retry
+        self.failed_urls_for_retry: deque = deque(maxlen=50)
+
+    def record_attempt(self, url: str, success: bool, status_code: Optional[int] = None,
+                      exception: Optional[Exception] = None):
+        """
+        Record an attempt and classify if it's a blocking signal.
+
+        Blocking signals include:
+        - HTTP 403 (Forbidden) or 429 (Rate Limit)
+        - Connection errors, TLS failures, connection resets
+        """
+        parsed = urllib.parse.urlparse(url)
+        domain = parsed.netloc
+
+        # Determine if this is a blocking-type failure
+        is_blocking = False
+        if not success:
+            # HTTP status codes that indicate blocking
+            if status_code in [403, 429]:
+                is_blocking = True
+            # Network-level errors that indicate blocking
+            elif exception:
+                error_msg = str(exception).lower()
+                blocking_errors = [
+                    'connection reset',
+                    'tls',
+                    'ssl',
+                    'clientconnectorerror',
+                    'connectionreseterror'
+                ]
+                is_blocking = any(err in error_msg for err in blocking_errors)
+
+        self.recent_attempts.append((url, domain, is_blocking, time.time()))
+
+        # Save failed URLs for potential retry
+        if not success and is_blocking:
+            self.failed_urls_for_retry.append(url)
+
+    def is_likely_blocked(self) -> Tuple[bool, dict]:
+        """
+        Check if failure pattern indicates IP blocking.
+
+        Returns:
+            Tuple of (is_blocked, stats_dict)
+
+        Logic:
+        - Must meet threshold of blocking failures
+        - Must affect multiple domains (not just one problematic site)
+        - Must have high blocking rate (≥60% of recent attempts)
+        """
+        # Extract blocking failures from recent attempts
+        blocking_failures = [
+            (url, domain)
+            for url, domain, is_blocking, _ in self.recent_attempts
+            if is_blocking
+        ]
+
+        # Not enough blocking failures to trigger
+        if len(blocking_failures) < self.threshold:
+            return False, {}
+
+        # Check if recent blocking failures span multiple domains
+        recent_blocking = blocking_failures[-self.threshold:]
+        unique_domains = set(domain for _, domain in recent_blocking)
+
+        # Calculate blocking rate within the window
+        total_in_window = len(self.recent_attempts)
+        blocking_rate = len(blocking_failures) / max(total_in_window, 1)
+
+        # Trigger blocking alert if:
+        # 1. Threshold of blocking failures met
+        # 2. Multiple domains affected (≥2) - single domain issues don't indicate IP block
+        # 3. High blocking rate (≥60%) - prevents false positives in large crawls
+        is_blocked = (
+            len(blocking_failures) >= self.threshold and
+            len(unique_domains) >= 2 and
+            blocking_rate >= 0.6
+        )
+
+        # Gather statistics for reporting
+        stats = {
+            'blocking_failures': len(blocking_failures),
+            'total_attempts': total_in_window,
+            'blocking_rate': blocking_rate,
+            'unique_domains': len(unique_domains),
+            'affected_domains': list(unique_domains)[:5],  # Show first 5 domains
+            'retry_queue_size': len(self.failed_urls_for_retry)
+        }
+
+        return is_blocked, stats
+
+    def get_retry_urls(self) -> List[str]:
+        """Get list of failed URLs available for retry"""
+        return list(self.failed_urls_for_retry)
+
+    def reset(self):
+        """Reset the detector state (called after handling a block)"""
+        self.recent_attempts.clear()
+        # Keep retry queue for user to access
+
+
 def normalize_url(url: str) -> str:
     u = urllib.parse.urlsplit(url)
     if not u.scheme:
@@ -320,6 +439,141 @@ def extract_resource_urls(html: str, base_url: str) -> List[str]:
             except Exception:
                 continue
     return list(urls)
+
+
+async def handle_pause_prompt(pause_event: asyncio.Event, block_detector: BlockDetector,
+                              auto_resume_secs: int, retry_urls_queue: Optional[asyncio.Queue] = None):
+    """
+    Handle user prompt during blocking pause with timeout for headless environments.
+
+    Args:
+        pause_event: Event to set when resuming
+        block_detector: BlockDetector instance to get retry URLs from
+        auto_resume_secs: Seconds to wait before auto-resuming (0 = wait indefinitely)
+        retry_urls_queue: Optional queue to add retry URLs to
+    """
+    def prompt_with_timeout():
+        """Blocking input with timeout (runs in thread pool)"""
+        print("\n" + "="*60, file=sys.stderr)
+        print("🛑 CRAWL PAUSED - Blocking detected", file=sys.stderr)
+        print("="*60, file=sys.stderr)
+        print("\nOptions:", file=sys.stderr)
+        print("  [c] Continue crawling from current position", file=sys.stderr)
+        print("  [r] Retry recently failed URLs, then continue", file=sys.stderr)
+        print("  [q] Quit gracefully (checkpoint saved)", file=sys.stderr)
+
+        if auto_resume_secs > 0:
+            print(f"\n⏰ Auto-resume in {auto_resume_secs}s if no input...\n", file=sys.stderr)
+
+        print("Your choice [c/r/q]: ", file=sys.stderr, end='', flush=True)
+
+        try:
+            if auto_resume_secs > 0:
+                # Check if stdin has data with timeout
+                ready, _, _ = select.select([sys.stdin], [], [], auto_resume_secs)
+                if ready:
+                    choice = sys.stdin.readline().strip().lower()
+                else:
+                    print("\n⏰ Auto-resuming (timeout)", file=sys.stderr)
+                    return 'c'
+            else:
+                # Wait indefinitely for input
+                choice = input().strip().lower()
+
+            return choice if choice in ['c', 'r', 'q'] else 'c'
+
+        except Exception as e:
+            # If input fails (e.g., no TTY), auto-resume
+            print(f"\n⚠️  Input error ({e}), auto-resuming", file=sys.stderr)
+            return 'c'
+
+    # Run blocking input in thread pool to avoid blocking event loop
+    loop = asyncio.get_event_loop()
+    choice = await loop.run_in_executor(None, prompt_with_timeout)
+
+    if choice == 'q':
+        print("\n✅ Quitting gracefully (checkpoint saved)...", file=sys.stderr)
+        sys.exit(0)
+
+    elif choice == 'r':
+        retry_urls = block_detector.get_retry_urls()
+        print(f"\n🔄 Re-queueing {len(retry_urls)} failed URLs for retry...", file=sys.stderr)
+
+        # Add retry URLs back to the work queue if provided
+        if retry_urls_queue:
+            for url in retry_urls:
+                await retry_urls_queue.put(url)
+
+    # Resume crawling (both 'c' and 'r' paths)
+    print(f"\n▶️  Resuming crawl...\n", file=sys.stderr)
+    pause_event.set()
+
+
+async def block_detection_coordinator(detector_queue: asyncio.Queue, pause_event: asyncio.Event,
+                                      block_detector: BlockDetector, block_action: str,
+                                      auto_resume_secs: int, retry_urls_queue: Optional[asyncio.Queue] = None):
+    """
+    Monitor attempts for blocking patterns and handle pause/resume.
+
+    Args:
+        detector_queue: Queue receiving attempt reports from workers
+        pause_event: Event to control worker pause/resume
+        block_detector: BlockDetector instance
+        block_action: Action to take on block detection (pause/warn/abort)
+        auto_resume_secs: Seconds before auto-resume in headless mode
+        retry_urls_queue: Optional queue to add retry URLs to
+    """
+    while True:
+        attempt = await detector_queue.get()
+
+        # Poison pill signals shutdown
+        if attempt is None:
+            detector_queue.task_done()
+            break
+
+        # Record attempt in block detector
+        block_detector.record_attempt(
+            attempt['url'],
+            attempt['success'],
+            attempt.get('status_code'),
+            attempt.get('exception')
+        )
+
+        # Check for blocking pattern
+        is_blocked, stats = block_detector.is_likely_blocked()
+
+        if is_blocked:
+            # Pause all workers
+            pause_event.clear()
+
+            # Print detailed alert
+            print("\n" + "="*70, file=sys.stderr)
+            print("⚠️  IP BLOCKING DETECTED", file=sys.stderr)
+            print("="*70, file=sys.stderr)
+            print(f"📊 Statistics:", file=sys.stderr)
+            print(f"   • {stats['blocking_failures']}/{stats['total_attempts']} recent attempts blocked ({stats['blocking_rate']:.0%})", file=sys.stderr)
+            print(f"   • {stats['unique_domains']} different domains affected", file=sys.stderr)
+            print(f"   • Affected domains: {', '.join(stats['affected_domains'])}", file=sys.stderr)
+            print(f"   • {stats['retry_queue_size']} URLs queued for potential retry", file=sys.stderr)
+            print("="*70, file=sys.stderr)
+
+            # Take configured action
+            if block_action == 'pause':
+                await handle_pause_prompt(pause_event, block_detector, auto_resume_secs, retry_urls_queue)
+
+            elif block_action == 'warn':
+                print("⚠️  Continuing anyway (--block-action warn)\n", file=sys.stderr)
+                pause_event.set()
+
+            elif block_action == 'abort':
+                print("❌ Aborting crawl (--block-action abort)", file=sys.stderr)
+                sys.exit(1)
+
+            # Reset detector after handling block
+            block_detector.reset()
+
+        detector_queue.task_done()
+
 
 async def fetch_html(client: httpx.AsyncClient, url: str) -> Tuple[str, Dict[str, str], int, str]:
     """Fetch HTML with error handling. Returns (html, headers, status_code, final_url)"""
@@ -606,7 +860,7 @@ async def writer_worker(queue: asyncio.Queue, output_file: Optional[str], pretty
         if f:
             f.close()
 
-async def run(urls: List[str], concurrency: int = 2, render: bool = False, validate: bool = False, user_agent: str = DEFAULT_UA, output: Optional[str] = None, output_format: str = "jsonl", pretty: bool = False, max_retries: int = 3, failures_output: Optional[str] = None, checkpoint_file: Optional[str] = None, try_variations: bool = False, max_variations: int = 4, progress_interval: int = 10, progress_style: str = "compact", quiet: bool = False, delay: float = 3.0, jitter: float = 1.0, max_per_domain: int = 1):
+async def run(urls: List[str], concurrency: int = 2, render: bool = False, validate: bool = False, user_agent: str = DEFAULT_UA, output: Optional[str] = None, output_format: str = "jsonl", pretty: bool = False, max_retries: int = 3, failures_output: Optional[str] = None, checkpoint_file: Optional[str] = None, try_variations: bool = False, max_variations: int = 4, progress_interval: int = 10, progress_style: str = "compact", quiet: bool = False, delay: float = 3.0, jitter: float = 1.0, max_per_domain: int = 1, block_detection: bool = False, block_threshold: int = 5, block_window: int = 20, block_action: str = "pause", block_auto_resume: int = 300):
     limits = httpx.Limits(max_connections=concurrency)
 
     # Create queue for results (bounded to prevent memory issues)
@@ -629,6 +883,30 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
     failure_writer_task = None
     if failure_queue:
         failure_writer_task = asyncio.create_task(writer_worker(failure_queue, failures_output, pretty=False))
+
+    # Block detection setup (if enabled)
+    pause_event = asyncio.Event()
+    pause_event.set()  # Initially not paused
+    block_detector = None
+    detector_queue = None
+    coordinator_task = None
+    retry_urls_queue = asyncio.Queue()  # Queue for retrying failed URLs
+
+    if block_detection:
+        block_detector = BlockDetector(threshold=block_threshold, window_size=block_window)
+        detector_queue = asyncio.Queue(maxsize=concurrency * 2)
+        coordinator_task = asyncio.create_task(
+            block_detection_coordinator(
+                detector_queue,
+                pause_event,
+                block_detector,
+                block_action,
+                block_auto_resume,
+                retry_urls_queue
+            )
+        )
+        if not quiet:
+            print(f"🛡️  Block detection enabled (threshold={block_threshold}, window={block_window}, action={block_action})", file=sys.stderr)
 
     # Progress tracking with ProgressTracker
     total_urls = len(urls)
@@ -668,12 +946,15 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
         async with httpx.AsyncClient(http2=True, headers={"user-agent": user_agent}, limits=limits, verify=False) as client:
             sem = asyncio.Semaphore(concurrency)
 
-            async def try_url_with_retries(url_to_try: str, original_url: str) -> Optional[dict]:
-                """Try a URL with retry logic. Returns result on success, None on failure.
+            async def try_url_with_retries(url_to_try: str, original_url: str) -> Tuple[Optional[dict], Optional[int], Optional[Exception]]:
+                """Try a URL with retry logic. Returns (result, status_code, exception).
 
                 Args:
                     url_to_try: The URL to actually fetch (normalized or variation)
                     original_url: The exact original URL from input (preserved for result)
+
+                Returns:
+                    Tuple of (result_dict or None, status_code or None, exception or None)
                 """
                 last_exception = None
                 last_status_code = None
@@ -690,7 +971,9 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                         # Acquire domain semaphore to ensure max_per_domain limit
                         async with domain_sem:
                             res = await process_url(original_url, url_to_try, client, render, validate)
-                            return res  # Success
+                            # Success - return result with status code from result
+                            status = res.get('http_status', 200)
+                            return res, status, None
 
                     except Exception as e:
                         last_exception = e
@@ -724,7 +1007,8 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                             # Final attempt failed or non-transient error
                             break
 
-                return None  # All retries failed
+                # All retries failed - return None result with failure info
+                return None, last_status_code, last_exception
 
             async def worker(u: str):
                 """Worker that processes a single URL with retry logic and optional URL variations
@@ -734,11 +1018,23 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                 """
 
                 async with sem:
+                    # Wait if paused (block detection)
+                    await pause_event.wait()
+
                     # Normalize URL for fetching, but preserve original for tracking
                     normalized = normalize_url(u)
 
                     # Try normalized URL first, passing original u for result tracking
-                    result = await try_url_with_retries(normalized, u)
+                    result, status_code, exception = await try_url_with_retries(normalized, u)
+
+                    # Report attempt to block detector if enabled
+                    if detector_queue:
+                        await detector_queue.put({
+                            'url': normalized,
+                            'success': result is not None,
+                            'status_code': status_code,
+                            'exception': exception
+                        })
 
                     if result is not None:
                         # Original URL succeeded
@@ -774,7 +1070,19 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                             print(f"Normalized URL failed, trying {len(variations)} variation(s) for {u}", file=sys.stderr)
 
                         for variation_url in variations:
-                            result = await try_url_with_retries(variation_url, u)
+                            # Wait if paused before trying variation
+                            await pause_event.wait()
+
+                            result, var_status_code, var_exception = await try_url_with_retries(variation_url, u)
+
+                            # Report variation attempt to block detector
+                            if detector_queue:
+                                await detector_queue.put({
+                                    'url': variation_url,
+                                    'success': result is not None,
+                                    'status_code': var_status_code,
+                                    'exception': var_exception
+                                })
 
                             if result is not None:
                                 # Variation succeeded
@@ -862,10 +1170,18 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
             if failure_queue:
                 await failure_queue.put(None)
 
+            # Send poison pill to block detector coordinator if enabled
+            if detector_queue:
+                await detector_queue.put(None)
+
             # Wait for writer to finish
             await writer_task
             if failure_writer_task:
                 await failure_writer_task
+
+            # Wait for coordinator to finish if enabled
+            if coordinator_task:
+                await coordinator_task
 
             # Final summary
             if not quiet:

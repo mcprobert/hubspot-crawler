@@ -136,7 +136,75 @@ hubspot-crawl --input urls.txt --out results.xlsx --output-format xlsx
 pip install '.[excel]'  # Install Excel support first
 hubspot-crawl --input urls.txt --out results.xlsx --output-format xlsx \
   --checkpoint checkpoint.txt --max-retries 3 --concurrency 20
+
+# Block detection for large-scale crawls (100k-1M URLs)
+hubspot-crawl --input urls.txt --out results.jsonl \
+  --block-detection --block-threshold 5 --block-window 20
+
+# With interactive pause on blocking (allows VPN/IP change)
+hubspot-crawl --input urls.txt --out results.jsonl \
+  --block-detection --block-action pause --block-auto-resume 300
+
+# Headless mode with warning only (no pause)
+hubspot-crawl --input urls.txt --out results.jsonl \
+  --block-detection --block-action warn
 ```
+
+## Block Detection
+
+**New in v1.6.0 (Phase 7.3):** Intelligent blocking detection for massive crawls.
+
+### Overview
+When crawling 100k-1M URLs, IP blocking becomes a significant risk. The block detector monitors failure patterns and can automatically pause the crawl when blocking is detected, allowing you to change your IP address (via VPN) before continuing.
+
+### How It Works
+1. **Smart Classification**: Tracks blocking signals (HTTP 403/429, connection resets, TLS failures) separately from normal errors (404, 500, timeouts)
+2. **Multi-Domain Detection**: Only triggers when failures span multiple domains (prevents false positives from single-site issues)
+3. **Rate Threshold**: Requires ≥60% blocking rate in recent attempts (prevents noise in large crawls)
+4. **Sliding Window**: Monitors last N attempts (default: 20) for patterns
+
+### Trigger Conditions
+Blocking detected when ALL conditions met:
+- ≥ threshold blocking failures (default: 5)
+- ≥ 2 unique domains affected
+- ≥ 60% blocking rate in window
+
+### Actions on Detection
+- **pause** (default): Interactive prompt with options:
+  - `[c]` Continue from current position
+  - `[r]` Retry recently failed URLs, then continue
+  - `[q]` Quit gracefully (checkpoint saved)
+  - Auto-resume after timeout (default: 300s for headless)
+- **warn**: Log warning and continue (headless-friendly)
+- **abort**: Exit immediately with error code
+
+### CLI Parameters
+```bash
+--block-detection              # Enable detection (off by default)
+--block-threshold N            # Failures to trigger (default: 5)
+--block-window N               # Sliding window size (default: 20)
+--block-action [pause|warn|abort]  # Action on detection (default: pause)
+--block-auto-resume SECS       # Auto-resume timeout (default: 300, 0=never)
+```
+
+### Example Workflow
+```bash
+# Start crawl with block detection
+hubspot-crawl --input 100k-urls.txt --out results.jsonl \
+  --block-detection --checkpoint checkpoint.txt --quiet
+
+# If blocking detected:
+# 1. Crawler pauses and shows stats
+# 2. Change IP address via VPN
+# 3. Press 'r' to retry failed URLs
+# 4. Crawl resumes automatically
+```
+
+### Best Practices
+- **Large crawls (100k+)**: Always enable `--block-detection`
+- **Headless environments**: Use `--block-action warn` or `--block-action abort`
+- **Conservative settings**: Increase `--block-threshold` to reduce false positives
+- **Aggressive detection**: Decrease `--block-window` for faster detection
 
 ## Architecture
 

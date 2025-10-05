@@ -1,8 +1,8 @@
 # HubSpot Crawler - Development Status
 
 **Last Updated:** 2025-10-05
-**Version:** 1.5.2 (Phase 1-7.2 Complete)
-**Status:** ✅ Production Ready - Large-Scale Capable (218/218 tests passing, 94% detector coverage)
+**Version:** 1.6.0 (Phase 1-7.3 Complete)
+**Status:** ✅ Production Ready - Enterprise-Scale Capable (239/239 tests passing, 94% detector coverage)
 **GitHub:** https://github.com/mcprobert/hubspot-crawler
 
 ---
@@ -14,9 +14,10 @@ Python-based web crawler for detecting HubSpot integrations on websites. Identif
 **Key Features:**
 - Static HTML analysis (fast, 50-200 URLs/sec)
 - Optional dynamic rendering via Playwright (1-4 URLs/sec)
-- Schema-validated JSON output
+- Schema-validated JSON/CSV/Excel output
 - Hub ID extraction from scripts and analytics
 - Confidence-level scoring (definitive/strong/moderate/weak)
+- **Intelligent block detection** for 100k-1M URL crawls with manual intervention
 
 ---
 
@@ -60,6 +61,69 @@ hubspot-crawl --input urls.txt --out results.xlsx --output-format xlsx
 ✅ Proper data types
 ✅ Handles special characters without issues
 ✅ Optional dependency (doesn't affect base installation)
+
+---
+
+### Phase 7.3: Intelligent Block Detection ✅ COMPLETE
+**Status:** Feature addition - IP blocking detection with manual intervention
+**Completed:** 2025-10-05
+**Tests:** 239/239 passing (added 21 tests)
+
+**Goal:** Enable safe crawling of 100k-1M URLs by detecting IP blocks and allowing manual intervention (VPN/IP change).
+
+**Feature:** Intelligent block detection that monitors failure patterns and can pause crawls when blocking is detected, allowing users to change their IP address before continuing.
+
+**Implementation:**
+- Added `BlockDetector` class in crawler.py:252-367 with smart failure classification
+- Created `handle_pause_prompt()` async function for interactive pause handling (crawler.py:444-509)
+- Created `block_detection_coordinator()` to monitor and respond to blocking patterns (crawler.py:512-575)
+- Integrated pause/resume mechanism using `asyncio.Event`
+- Workers report attempts to central coordinator (prevents race conditions)
+- Modified `try_url_with_retries()` to return status_code and exception for analysis
+- Added 5 CLI parameters: `--block-detection`, `--block-threshold`, `--block-window`, `--block-action`, `--block-auto-resume`
+
+**Detection Logic:**
+- **Smart classification**: HTTP 403/429, connection resets, TLS failures = blocking signals
+- **Multi-domain check**: Only triggers when ≥2 domains affected (prevents false positives)
+- **Rate threshold**: Requires ≥60% blocking rate in sliding window
+- **Sliding window**: Tracks last N attempts (default: 20)
+
+**Actions on Detection:**
+1. **pause** (default): Interactive prompt with timeout support
+   - `[c]` Continue crawling
+   - `[r]` Retry failed URLs, then continue
+   - `[q]` Quit gracefully (checkpoint saved)
+   - Auto-resume after N seconds (default: 300s for headless)
+2. **warn**: Log warning and continue (headless-friendly)
+3. **abort**: Exit immediately with error code
+
+**Usage:**
+```bash
+# Enable block detection (basic)
+hubspot-crawl --input urls.txt --out results.jsonl --block-detection
+
+# With custom thresholds
+hubspot-crawl --input urls.txt --out results.jsonl \
+  --block-detection --block-threshold 7 --block-window 30
+
+# Headless mode (warning only, no pause)
+hubspot-crawl --input urls.txt --out results.jsonl \
+  --block-detection --block-action warn
+```
+
+**Testing:**
+- 21 comprehensive tests in test_block_detection.py
+- Tests cover: classification, sliding window, multi-domain detection, rate thresholds
+- Tests for false positive prevention (single domain, low rate, insufficient failures)
+- Integration tests for mixed blocking types and edge cases
+
+**Benefits:**
+✅ **Safe for massive crawls** - Prevents wasted time when blocked
+✅ **Manual intervention** - Pause to change VPN/IP, then resume
+✅ **Smart detection** - Multi-domain + rate checks minimize false positives
+✅ **Headless-friendly** - Auto-resume timeout + non-interactive modes
+✅ **Retry capability** - Can re-attempt recently failed URLs after IP change
+✅ **Comprehensive testing** - 21 tests covering all scenarios
 
 ---
 

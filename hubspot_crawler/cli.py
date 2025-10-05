@@ -37,6 +37,14 @@ def main():
     p.add_argument("--progress-interval", type=int, default=10, help="Progress update frequency in URLs (default: 10)")
     p.add_argument("--progress-style", choices=["compact", "detailed", "json"], default="compact", help="Progress output style (default: compact)")
     p.add_argument("--quiet", action="store_true", help="Suppress progress output (errors only)")
+
+    # Block detection parameters
+    p.add_argument("--block-detection", action="store_true", help="Enable automatic IP blocking detection")
+    p.add_argument("--block-threshold", type=int, default=5, help="Number of blocking failures to trigger alert (default: 5)")
+    p.add_argument("--block-window", type=int, default=20, help="Sliding window size for tracking attempts (default: 20)")
+    p.add_argument("--block-action", choices=["pause", "warn", "abort"], default="pause", help="Action when blocking detected: pause (interactive), warn (continue), abort (exit) (default: pause)")
+    p.add_argument("--block-auto-resume", type=int, default=300, help="Auto-resume after N seconds in headless mode (default: 300, 0=never)")
+
     args = p.parse_args()
 
     urls = []
@@ -127,7 +135,7 @@ def main():
             print("All URLs already completed!", file=sys.stderr)
             return
 
-    asyncio.run(run(urls, concurrency=concurrency, render=args.render, validate=args.validate, user_agent=args.user_agent, output=args.out, output_format=args.output_format, pretty=args.pretty, max_retries=args.max_retries, failures_output=args.failures, checkpoint_file=args.checkpoint, try_variations=args.try_variations, max_variations=args.max_variations, progress_interval=args.progress_interval, progress_style=args.progress_style, quiet=args.quiet, delay=delay, jitter=jitter, max_per_domain=max_per_domain))
+    asyncio.run(run(urls, concurrency=concurrency, render=args.render, validate=args.validate, user_agent=args.user_agent, output=args.out, output_format=args.output_format, pretty=args.pretty, max_retries=args.max_retries, failures_output=args.failures, checkpoint_file=args.checkpoint, try_variations=args.try_variations, max_variations=args.max_variations, progress_interval=args.progress_interval, progress_style=args.progress_style, quiet=args.quiet, delay=delay, jitter=jitter, max_per_domain=max_per_domain, block_detection=args.block_detection, block_threshold=args.block_threshold, block_window=args.block_window, block_action=args.block_action, block_auto_resume=args.block_auto_resume))
 
 if __name__ == "__main__":
     main()
