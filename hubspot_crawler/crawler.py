@@ -442,7 +442,7 @@ def extract_resource_urls(html: str, base_url: str) -> List[str]:
 
 
 async def handle_pause_prompt(pause_event: asyncio.Event, block_detector: BlockDetector,
-                              auto_resume_secs: int, retry_urls_queue: Optional[asyncio.Queue] = None):
+                              auto_resume_secs: int, quiet: bool = False):
     """
     Handle user prompt during blocking pause with timeout for headless environments.
 
@@ -450,8 +450,15 @@ async def handle_pause_prompt(pause_event: asyncio.Event, block_detector: BlockD
         pause_event: Event to set when resuming
         block_detector: BlockDetector instance to get retry URLs from
         auto_resume_secs: Seconds to wait before auto-resuming (0 = wait indefinitely)
-        retry_urls_queue: Optional queue to add retry URLs to
+        quiet: If True, auto-resume immediately (can't show interactive prompt)
     """
+    # In quiet mode or headless environment, auto-resume immediately
+    if quiet or not sys.stdin.isatty():
+        print("⚠️  Block detected but running in quiet/headless mode - auto-resuming", file=sys.stderr)
+        print(f"▶️  Resuming all workers (pause_event.set())", file=sys.stderr)
+        pause_event.set()
+        return
+
     def prompt_with_timeout():
         """Blocking input with timeout (runs in thread pool)"""
         print("\n" + "="*60, file=sys.stderr)
@@ -459,13 +466,12 @@ async def handle_pause_prompt(pause_event: asyncio.Event, block_detector: BlockD
         print("="*60, file=sys.stderr)
         print("\nOptions:", file=sys.stderr)
         print("  [c] Continue crawling from current position", file=sys.stderr)
-        print("  [r] Retry recently failed URLs, then continue", file=sys.stderr)
         print("  [q] Quit gracefully (checkpoint saved)", file=sys.stderr)
 
         if auto_resume_secs > 0:
             print(f"\n⏰ Auto-resume in {auto_resume_secs}s if no input...\n", file=sys.stderr)
 
-        print("Your choice [c/r/q]: ", file=sys.stderr, end='', flush=True)
+        print("Your choice [c/q]: ", file=sys.stderr, end='', flush=True)
 
         try:
             if auto_resume_secs > 0:
@@ -480,7 +486,7 @@ async def handle_pause_prompt(pause_event: asyncio.Event, block_detector: BlockD
                 # Wait indefinitely for input
                 choice = input().strip().lower()
 
-            return choice if choice in ['c', 'r', 'q'] else 'c'
+            return choice if choice in ['c', 'q'] else 'c'
 
         except Exception as e:
             # If input fails (e.g., no TTY), auto-resume
@@ -495,23 +501,14 @@ async def handle_pause_prompt(pause_event: asyncio.Event, block_detector: BlockD
         print("\n✅ Quitting gracefully (checkpoint saved)...", file=sys.stderr)
         sys.exit(0)
 
-    elif choice == 'r':
-        retry_urls = block_detector.get_retry_urls()
-        print(f"\n🔄 Re-queueing {len(retry_urls)} failed URLs for retry...", file=sys.stderr)
-
-        # Add retry URLs back to the work queue if provided
-        if retry_urls_queue:
-            for url in retry_urls:
-                await retry_urls_queue.put(url)
-
-    # Resume crawling (both 'c' and 'r' paths)
-    print(f"\n▶️  Resuming crawl...\n", file=sys.stderr)
+    # Resume crawling
+    print(f"\n▶️  Resuming crawl (pause_event.set())...\n", file=sys.stderr)
     pause_event.set()
 
 
 async def block_detection_coordinator(detector_queue: asyncio.Queue, pause_event: asyncio.Event,
                                       block_detector: BlockDetector, block_action: str,
-                                      auto_resume_secs: int, retry_urls_queue: Optional[asyncio.Queue] = None):
+                                      auto_resume_secs: int, quiet: bool = False):
     """
     Monitor attempts for blocking patterns and handle pause/resume.
 
@@ -521,58 +518,66 @@ async def block_detection_coordinator(detector_queue: asyncio.Queue, pause_event
         block_detector: BlockDetector instance
         block_action: Action to take on block detection (pause/warn/abort)
         auto_resume_secs: Seconds before auto-resume in headless mode
-        retry_urls_queue: Optional queue to add retry URLs to
+        quiet: If True, suppress interactive prompts
     """
-    while True:
-        attempt = await detector_queue.get()
+    try:
+        while True:
+            attempt = await detector_queue.get()
 
-        # Poison pill signals shutdown
-        if attempt is None:
+            # Poison pill signals shutdown
+            if attempt is None:
+                detector_queue.task_done()
+                break
+
+            # Record attempt in block detector
+            block_detector.record_attempt(
+                attempt['url'],
+                attempt['success'],
+                attempt.get('status_code'),
+                attempt.get('exception')
+            )
+
+            # Check for blocking pattern
+            is_blocked, stats = block_detector.is_likely_blocked()
+
+            if is_blocked:
+                # Pause all workers
+                print(f"🛑 Pausing all workers (pause_event.clear())", file=sys.stderr)
+                pause_event.clear()
+
+                # Print detailed alert
+                print("\n" + "="*70, file=sys.stderr)
+                print("⚠️  IP BLOCKING DETECTED", file=sys.stderr)
+                print("="*70, file=sys.stderr)
+                print(f"📊 Statistics:", file=sys.stderr)
+                print(f"   • {stats['blocking_failures']}/{stats['total_attempts']} recent attempts blocked ({stats['blocking_rate']:.0%})", file=sys.stderr)
+                print(f"   • {stats['unique_domains']} different domains affected", file=sys.stderr)
+                print(f"   • Affected domains: {', '.join(stats['affected_domains'])}", file=sys.stderr)
+                print(f"   • {stats['retry_queue_size']} URLs queued for potential retry", file=sys.stderr)
+                print("="*70, file=sys.stderr)
+
+                # Take configured action
+                if block_action == 'pause':
+                    await handle_pause_prompt(pause_event, block_detector, auto_resume_secs, quiet)
+
+                elif block_action == 'warn':
+                    print("⚠️  Continuing anyway (--block-action warn)", file=sys.stderr)
+                    print(f"▶️  Resuming all workers (pause_event.set())\n", file=sys.stderr)
+                    pause_event.set()
+
+                elif block_action == 'abort':
+                    print("❌ Aborting crawl (--block-action abort)", file=sys.stderr)
+                    sys.exit(1)
+
+                # Reset detector after handling block
+                block_detector.reset()
+
             detector_queue.task_done()
-            break
-
-        # Record attempt in block detector
-        block_detector.record_attempt(
-            attempt['url'],
-            attempt['success'],
-            attempt.get('status_code'),
-            attempt.get('exception')
-        )
-
-        # Check for blocking pattern
-        is_blocked, stats = block_detector.is_likely_blocked()
-
-        if is_blocked:
-            # Pause all workers
-            pause_event.clear()
-
-            # Print detailed alert
-            print("\n" + "="*70, file=sys.stderr)
-            print("⚠️  IP BLOCKING DETECTED", file=sys.stderr)
-            print("="*70, file=sys.stderr)
-            print(f"📊 Statistics:", file=sys.stderr)
-            print(f"   • {stats['blocking_failures']}/{stats['total_attempts']} recent attempts blocked ({stats['blocking_rate']:.0%})", file=sys.stderr)
-            print(f"   • {stats['unique_domains']} different domains affected", file=sys.stderr)
-            print(f"   • Affected domains: {', '.join(stats['affected_domains'])}", file=sys.stderr)
-            print(f"   • {stats['retry_queue_size']} URLs queued for potential retry", file=sys.stderr)
-            print("="*70, file=sys.stderr)
-
-            # Take configured action
-            if block_action == 'pause':
-                await handle_pause_prompt(pause_event, block_detector, auto_resume_secs, retry_urls_queue)
-
-            elif block_action == 'warn':
-                print("⚠️  Continuing anyway (--block-action warn)\n", file=sys.stderr)
-                pause_event.set()
-
-            elif block_action == 'abort':
-                print("❌ Aborting crawl (--block-action abort)", file=sys.stderr)
-                sys.exit(1)
-
-            # Reset detector after handling block
-            block_detector.reset()
-
-        detector_queue.task_done()
+    finally:
+        # Ensure workers are always resumed even if coordinator crashes
+        if not pause_event.is_set():
+            print(f"⚠️  Coordinator cleanup - ensuring workers resumed", file=sys.stderr)
+            pause_event.set()
 
 
 async def fetch_html(client: httpx.AsyncClient, url: str) -> Tuple[str, Dict[str, str], int, str]:
@@ -773,11 +778,11 @@ async def csv_writer_worker(queue: asyncio.Queue, output_file: Optional[str]):
             if item is None:
                 break
 
-            # Flatten and write
+            # Flatten and write (move to thread to avoid blocking event loop)
             flat_row = flatten_result_for_csv(item)
-            writer.writerow(flat_row)
+            await asyncio.to_thread(writer.writerow, flat_row)
             if f:
-                f.flush()
+                await asyncio.to_thread(f.flush)
 
             queue.task_done()
     finally:
@@ -827,8 +832,8 @@ async def excel_writer_worker(queue: asyncio.Queue, output_file: str):
 
             queue.task_done()
     finally:
-        # Save workbook
-        wb.save(output_file)
+        # Save workbook (move to thread to avoid blocking event loop)
+        await asyncio.to_thread(wb.save, output_file)
 
 async def writer_worker(queue: asyncio.Queue, output_file: Optional[str], pretty: bool = False):
     """Single writer coroutine that drains queue and writes to file or stdout.
@@ -860,8 +865,9 @@ async def writer_worker(queue: asyncio.Queue, output_file: Optional[str], pretty
         if f:
             f.close()
 
-async def run(urls: List[str], concurrency: int = 2, render: bool = False, validate: bool = False, user_agent: str = DEFAULT_UA, output: Optional[str] = None, output_format: str = "jsonl", pretty: bool = False, max_retries: int = 3, failures_output: Optional[str] = None, checkpoint_file: Optional[str] = None, try_variations: bool = False, max_variations: int = 4, progress_interval: int = 10, progress_style: str = "compact", quiet: bool = False, delay: float = 3.0, jitter: float = 1.0, max_per_domain: int = 1, block_detection: bool = False, block_threshold: int = 5, block_window: int = 20, block_action: str = "pause", block_auto_resume: int = 300):
-    limits = httpx.Limits(max_connections=concurrency)
+async def run(urls: List[str], concurrency: int = 2, render: bool = False, validate: bool = False, user_agent: str = DEFAULT_UA, output: Optional[str] = None, output_format: str = "jsonl", pretty: bool = False, max_retries: int = 3, failures_output: Optional[str] = None, checkpoint_file: Optional[str] = None, try_variations: bool = False, max_variations: int = 4, progress_interval: int = 10, progress_style: str = "compact", quiet: bool = False, delay: float = 3.0, jitter: float = 1.0, max_per_domain: int = 1, block_detection: bool = False, block_threshold: int = 5, block_window: int = 20, block_action: str = "pause", block_auto_resume: int = 300, insecure: bool = False):
+    # DEADLOCK FIX: Disable connection pooling to prevent CLOSE_WAIT accumulation
+    limits = httpx.Limits(max_connections=concurrency, max_keepalive_connections=0)
 
     # Create queue for results (bounded to prevent memory issues)
     result_queue = asyncio.Queue(maxsize=concurrency * 2)
@@ -884,17 +890,29 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
     if failure_queue:
         failure_writer_task = asyncio.create_task(writer_worker(failure_queue, failures_output, pretty=False))
 
+    # Helper function to check writer health before queue operations
+    def check_writer_health():
+        """Check if writer tasks have failed and raise exception if so."""
+        if writer_task.done():
+            exc = writer_task.exception()
+            if exc:
+                raise RuntimeError(f"Result writer task failed: {exc}") from exc
+        if failure_writer_task and failure_writer_task.done():
+            exc = failure_writer_task.exception()
+            if exc:
+                raise RuntimeError(f"Failure writer task failed: {exc}") from exc
+
     # Block detection setup (if enabled)
     pause_event = asyncio.Event()
     pause_event.set()  # Initially not paused
     block_detector = None
     detector_queue = None
     coordinator_task = None
-    retry_urls_queue = asyncio.Queue()  # Queue for retrying failed URLs
 
     if block_detection:
         block_detector = BlockDetector(threshold=block_threshold, window_size=block_window)
-        detector_queue = asyncio.Queue(maxsize=concurrency * 2)
+        # Unbounded queue to prevent deadlock during pause (workers won't block on put)
+        detector_queue = asyncio.Queue()
         coordinator_task = asyncio.create_task(
             block_detection_coordinator(
                 detector_queue,
@@ -902,7 +920,7 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                 block_detector,
                 block_action,
                 block_auto_resume,
-                retry_urls_queue
+                quiet
             )
         )
         if not quiet:
@@ -942,8 +960,12 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
             actual_delay = max(0.0, actual_delay)
             await asyncio.sleep(actual_delay)
 
+    # Warn if TLS verification disabled
+    if insecure and not quiet:
+        print("⚠️  WARNING: TLS certificate verification disabled!", file=sys.stderr)
+
     try:
-        async with httpx.AsyncClient(http2=True, headers={"user-agent": user_agent}, limits=limits, verify=False) as client:
+        async with httpx.AsyncClient(http2=True, headers={"user-agent": user_agent}, limits=limits, verify=not insecure) as client:
             sem = asyncio.Semaphore(concurrency)
 
             async def try_url_with_retries(url_to_try: str, original_url: str) -> Tuple[Optional[dict], Optional[int], Optional[Exception]]:
@@ -964,13 +986,25 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
 
                 # Retry loop with exponential backoff
                 for attempt in range(max_retries):
+                    # Check pause before every attempt (block detection can trigger mid-retry)
+                    try:
+                        await asyncio.wait_for(pause_event.wait(), timeout=300)
+                    except asyncio.TimeoutError:
+                        print(f"⚠️  Retry loop timeout on pause - auto-resuming to prevent deadlock", file=sys.stderr)
+                        pause_event.set()
+
                     try:
                         # Apply request delay with jitter (anti-blocking measure)
                         await apply_request_delay()
 
                         # Acquire domain semaphore to ensure max_per_domain limit
                         async with domain_sem:
-                            res = await process_url(original_url, url_to_try, client, render, validate)
+                            # DEADLOCK FIX: Hard 30s timeout to prevent infinite hangs
+                            # httpx timeout doesn't catch CLOSE_WAIT connections
+                            res = await asyncio.wait_for(
+                                process_url(original_url, url_to_try, client, render, validate),
+                                timeout=30.0
+                            )
                             # Success - return result with status code from result
                             status = res.get('http_status', 200)
                             return res, status, None
@@ -1018,8 +1052,12 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                 """
 
                 async with sem:
-                    # Wait if paused (block detection)
-                    await pause_event.wait()
+                    # Wait if paused (block detection) with timeout protection
+                    try:
+                        await asyncio.wait_for(pause_event.wait(), timeout=300)
+                    except asyncio.TimeoutError:
+                        # Just log timeout, don't mutate pause_event (let coordinator handle resume)
+                        print(f"⚠️  Worker timeout on pause after 300s - coordinator should handle resume", file=sys.stderr)
 
                     # Normalize URL for fetching, but preserve original for tracking
                     normalized = normalize_url(u)
@@ -1038,6 +1076,7 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
 
                     if result is not None:
                         # Original URL succeeded
+                        check_writer_health()  # Fail fast if writer died
                         await result_queue.put(result)
 
                         # Update progress and write to checkpoint
@@ -1055,10 +1094,10 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                                 else:  # compact
                                     print(tracker.get_compact_status(), file=sys.stderr)
 
-                            # Write URL to checkpoint file
+                            # Write URL to checkpoint file (move to thread to avoid blocking event loop)
                             if checkpoint_handle:
-                                checkpoint_handle.write(u + "\n")
-                                checkpoint_handle.flush()
+                                await asyncio.to_thread(checkpoint_handle.write, u + "\n")
+                                await asyncio.to_thread(checkpoint_handle.flush)
 
                         return  # Success
 
@@ -1070,8 +1109,12 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                             print(f"Normalized URL failed, trying {len(variations)} variation(s) for {u}", file=sys.stderr)
 
                         for variation_url in variations:
-                            # Wait if paused before trying variation
-                            await pause_event.wait()
+                            # Wait if paused before trying variation (with timeout protection)
+                            try:
+                                await asyncio.wait_for(pause_event.wait(), timeout=300)
+                            except asyncio.TimeoutError:
+                                # Just log timeout, don't mutate pause_event (let coordinator handle resume)
+                                print(f"⚠️  Variation worker timeout on pause after 300s - coordinator should handle resume", file=sys.stderr)
 
                             result, var_status_code, var_exception = await try_url_with_retries(variation_url, u)
 
@@ -1087,6 +1130,7 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                             if result is not None:
                                 # Variation succeeded
                                 print(f"Success with variation: {variation_url} (original: {u})", file=sys.stderr)
+                                check_writer_health()  # Fail fast if writer died
                                 await result_queue.put(result)
 
                                 # Update progress and write to checkpoint
@@ -1104,10 +1148,10 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                                         else:  # compact
                                             print(tracker.get_compact_status(), file=sys.stderr)
 
-                                    # Write original URL to checkpoint (not variation)
+                                    # Write original URL to checkpoint (not variation - move to thread)
                                     if checkpoint_handle:
-                                        checkpoint_handle.write(u + "\n")
-                                        checkpoint_handle.flush()
+                                        await asyncio.to_thread(checkpoint_handle.write, u + "\n")
+                                        await asyncio.to_thread(checkpoint_handle.flush)
 
                                 return  # Success with variation
 
@@ -1160,10 +1204,16 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                     await result_queue.put(err)
 
                     if failure_queue:
+                        check_writer_health()  # Fail fast if writer died
                         await failure_queue.put(err)
 
             # Process all URLs
             await asyncio.gather(*(worker(u) for u in urls))
+
+            # Ensure we can shutdown even if paused
+            if pause_event and not pause_event.is_set():
+                print(f"⚠️  Shutdown while paused - resuming to allow cleanup", file=sys.stderr)
+                pause_event.set()
 
             # Send poison pill to signal writer to stop
             await result_queue.put(None)
@@ -1171,8 +1221,14 @@ async def run(urls: List[str], concurrency: int = 2, render: bool = False, valid
                 await failure_queue.put(None)
 
             # Send poison pill to block detector coordinator if enabled
+            # Use put_nowait since queue might be unbounded but we want to avoid blocking
             if detector_queue:
-                await detector_queue.put(None)
+                try:
+                    detector_queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    # Queue full (shouldn't happen with unbounded queue), cancel coordinator instead
+                    if coordinator_task:
+                        coordinator_task.cancel()
 
             # Wait for writer to finish
             await writer_task

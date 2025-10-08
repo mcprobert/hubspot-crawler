@@ -25,6 +25,7 @@ def main():
 
     p.add_argument("--render", action="store_true", help="Use Playwright headless browser to execute JS and capture network")
     p.add_argument("--validate", action="store_true", help="Validate output against JSON Schema (requires jsonschema)")
+    p.add_argument("--insecure", action="store_true", help="Disable TLS certificate verification (DANGEROUS - allows MITM attacks)")
     p.add_argument("--user-agent", default="WhitehatHubSpotCrawler/1.0 (+https://whitehat-seo.co.uk)")
     p.add_argument("--out", help="Output file (JSONL, CSV, or Excel depending on --output-format)")
     p.add_argument("--output-format", choices=["jsonl", "csv", "xlsx"], default="jsonl", help="Output format: jsonl (default), csv, or xlsx (Excel)")
@@ -110,10 +111,38 @@ def main():
     jitter = args.jitter if args.jitter is not None else preset["jitter"]
     max_per_domain = args.max_per_domain if args.max_per_domain is not None else preset["max_per_domain"]
 
+    # Validate numeric parameters
+    if concurrency <= 0:
+        p.error(f"--concurrency must be >= 1 (got {concurrency})")
+    if delay < 0:
+        p.error(f"--delay must be >= 0 (got {delay})")
+    if jitter < 0:
+        p.error(f"--jitter must be >= 0 (got {jitter})")
+    if max_per_domain <= 0:
+        p.error(f"--max-per-domain must be >= 1 (got {max_per_domain})")
+    if args.max_retries < 0:
+        p.error(f"--max-retries must be >= 0 (got {args.max_retries})")
+    if args.progress_interval <= 0:
+        p.error(f"--progress-interval must be >= 1 (got {args.progress_interval})")
+    if args.max_variations < 0:
+        p.error(f"--max-variations must be >= 0 (got {args.max_variations})")
+    if args.block_threshold <= 0:
+        p.error(f"--block-threshold must be >= 1 (got {args.block_threshold})")
+    if args.block_window <= 0:
+        p.error(f"--block-window must be >= 1 (got {args.block_window})")
+    if args.block_auto_resume < 0:
+        p.error(f"--block-auto-resume must be >= 0 (got {args.block_auto_resume})")
+
+    # Validate block detection settings
+    if args.quiet and args.block_detection and args.block_action == "pause":
+        p.error("--block-action pause requires interactive mode and cannot be used with --quiet.\n"
+                "Use --block-action warn or --block-action abort instead for quiet/headless operation.")
+
     # Print mode selection if not quiet
-    print(f"Using mode: {preset['description']}", file=sys.stderr)
-    if args.concurrency is not None or args.delay is not None or args.jitter is not None or args.max_per_domain is not None:
-        print(f"Custom overrides applied: concurrency={concurrency}, delay={delay}, jitter={jitter}, max-per-domain={max_per_domain}", file=sys.stderr)
+    if not args.quiet:
+        print(f"Using mode: {preset['description']}", file=sys.stderr)
+        if args.concurrency is not None or args.delay is not None or args.jitter is not None or args.max_per_domain is not None:
+            print(f"Custom overrides applied: concurrency={concurrency}, delay={delay}, jitter={jitter}, max-per-domain={max_per_domain}", file=sys.stderr)
 
     # Resume from checkpoint if requested
     completed_urls = set()
@@ -122,20 +151,22 @@ def main():
         if os.path.exists(args.checkpoint):
             with open(args.checkpoint, "r", encoding="utf-8") as f:
                 completed_urls = set(ln.strip() for ln in f if ln.strip())
-            print(f"Loaded {len(completed_urls)} completed URLs from checkpoint {args.checkpoint}", file=sys.stderr)
+            if not args.quiet:
+                print(f"Loaded {len(completed_urls)} completed URLs from checkpoint {args.checkpoint}", file=sys.stderr)
 
             # Filter out already-completed URLs
             urls_before = len(urls)
             urls = [u for u in urls if u not in completed_urls]
             skipped = urls_before - len(urls)
-            if skipped > 0:
+            if skipped > 0 and not args.quiet:
                 print(f"Skipping {skipped} already-completed URLs", file=sys.stderr)
 
         if len(urls) == 0:
-            print("All URLs already completed!", file=sys.stderr)
+            if not args.quiet:
+                print("All URLs already completed!", file=sys.stderr)
             return
 
-    asyncio.run(run(urls, concurrency=concurrency, render=args.render, validate=args.validate, user_agent=args.user_agent, output=args.out, output_format=args.output_format, pretty=args.pretty, max_retries=args.max_retries, failures_output=args.failures, checkpoint_file=args.checkpoint, try_variations=args.try_variations, max_variations=args.max_variations, progress_interval=args.progress_interval, progress_style=args.progress_style, quiet=args.quiet, delay=delay, jitter=jitter, max_per_domain=max_per_domain, block_detection=args.block_detection, block_threshold=args.block_threshold, block_window=args.block_window, block_action=args.block_action, block_auto_resume=args.block_auto_resume))
+    asyncio.run(run(urls, concurrency=concurrency, render=args.render, validate=args.validate, user_agent=args.user_agent, output=args.out, output_format=args.output_format, pretty=args.pretty, max_retries=args.max_retries, failures_output=args.failures, checkpoint_file=args.checkpoint, try_variations=args.try_variations, max_variations=args.max_variations, progress_interval=args.progress_interval, progress_style=args.progress_style, quiet=args.quiet, delay=delay, jitter=jitter, max_per_domain=max_per_domain, block_detection=args.block_detection, block_threshold=args.block_threshold, block_window=args.block_window, block_action=args.block_action, block_auto_resume=args.block_auto_resume, insecure=args.insecure))
 
 if __name__ == "__main__":
     main()
