@@ -51,3 +51,4 @@ failures*.jsonl
 # URL input files (protect user data)
 urls.txt
 *_urls.txt
+uk-companies*.txt

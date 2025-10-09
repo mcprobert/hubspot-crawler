@@ -1,7 +1,7 @@
 # HubSpot Crawler - Development Status
 
-**Last Updated:** 2025-10-08
-**Version:** 1.7.0 (Phase 1-8 Complete)
+**Last Updated:** 2025-10-09
+**Version:** 1.7.1 (Phase 1-9 Complete)
 **Status:** ✅ Production Ready - Enterprise-Scale Capable (239/239 tests passing, 94% detector coverage)
 **GitHub:** https://github.com/mcprobert/hubspot-crawler
 
@@ -274,6 +274,127 @@ Added validation for concurrency, delay, jitter, max_per_domain, max_retries, et
 ✅ Clean codebase - removed broken features
 
 **Risk Level:** 🟢 LOW (from 🔴 HIGH in v1.6.3)
+
+---
+
+### Phase 9: Performance Optimization & Production Monitoring ✅ COMPLETE
+**Status:** Large-scale crawl optimization and tooling
+**Completed:** 2025-10-09
+**Tests:** 239/239 passing
+
+**Goal:** Optimize crawler performance for 900k+ URL crawls and create production monitoring tools.
+
+**Production Crawl Context:**
+- Dataset: 999,999 UK company URLs (999,538 unique)
+- Completed before optimization: 78,863 URLs (7.9%)
+- Remaining: 920,674 URLs (92.1%)
+- Initial issues: Excel format blocking checkpoint updates, slow processing rate
+
+**Critical Issues Fixed:**
+
+**Issue #1: Excel Format Prevents Checkpoint Updates (CRITICAL)**
+- Excel writer buffers ALL results in memory, only writes on completion
+- Checkpoint.txt not updating during crawl (meant 0 progress tracking)
+- Any crash = lose all progress since restart
+- **Fix:** Switched to JSONL format for line-by-line writes and checkpoint updates
+
+**Issue #2: Performance Bottleneck (37.8 day ETA → 9.6 days)**
+- Initial rate: 0.27 URLs/sec (988/hour) - 15x slower than expected
+- Root cause: 65.7% failure rate × 3 retries × 4 variations = 12 attempts per failure
+- Each failed URL taking 15-20 seconds (timeouts on defunct domains)
+- **Fix:** Optimized retry strategy and increased concurrency
+
+**Optimization Strategy:**
+1. **Mode change:** Conservative → Balanced
+   - Concurrency: 5 → 10 (2x faster)
+   - Delay: 1s → 0.5s (2x faster)
+2. **Retry optimization:**
+   - Max retries: 3 → 1 (3x faster on failures)
+   - Max variations: 4 → 2 (2x faster on failures)
+3. **Block detection tuning:**
+   - Threshold: 5 → 3 (faster detection)
+   - Window: 20 → 15 (more responsive)
+   - Auto-resume: 300s → 180s (quicker recovery)
+
+**Performance Results:**
+- Before: 0.27 URLs/sec (988/hour)
+- After: 1.10 URLs/sec (3,966/hour)
+- **4.1x speedup achieved**
+- ETA reduced: 37.8 days → 9.6 days (**saved 28 days**)
+
+**Production Tools Created:**
+
+**1. RESTART_v1.7.0.sh (208 lines)**
+- Interactive restart script with mode selection
+- Data integrity verification (checkpoint validation)
+- Automatic backup of existing results
+- Block detection configuration
+- Output format selection (JSONL/CSV/Excel)
+- Estimated completion time display
+
+**2. monitor_v1.7.0.py (225 lines)**
+- Real-time progress tracking
+- Automatic stall detection (10-minute threshold)
+- ETA calculation and rate monitoring
+- File modification time tracking
+- Visual alerts for stall conditions
+- Auto-refresh every 30 seconds
+
+**3. RESTART_GUIDE_v1.7.0.md (401 lines)**
+- Complete data integrity verification
+- Quick start commands
+- Troubleshooting procedures
+- Expected performance metrics
+- Emergency recovery procedures
+- Monitoring checklist
+
+**Data Integrity Verification:**
+```bash
+# Verified no data loss:
+- Original: 999,999 URLs (461 duplicates)
+- Unique: 999,538 URLs
+- Completed: 78,863 URLs (7.9%)
+- Failed: 28,386 URLs (2.8%)
+- Remaining: 920,674 URLs (92.1%)
+- ✅ No overlap between checkpoint and remaining
+- ✅ No duplicates in checkpoint
+- ✅ All URLs accounted for
+```
+
+**Optimized Command (Final Version):**
+```bash
+python3 -m hubspot_crawler.cli \
+  --input uk-companies-remaining-v1.7.0.txt \
+  --out results.jsonl \
+  --output-format jsonl \
+  --mode balanced \
+  --checkpoint checkpoint.txt \
+  --failures failures.jsonl \
+  --max-retries 1 \
+  --try-variations \
+  --max-variations 2 \
+  --progress-style detailed \
+  --progress-interval 50 \
+  --block-detection \
+  --block-action pause \
+  --block-threshold 3 \
+  --block-window 15 \
+  --block-auto-resume 180
+```
+
+**Benefits:**
+✅ 4x performance improvement (0.27 → 1.10 URLs/sec)
+✅ 28 days saved on 900k URL crawl
+✅ Real-time monitoring with stall detection
+✅ Complete data integrity verification
+✅ Production-ready tooling for large-scale crawls
+✅ Checkpoint updates working correctly with JSONL format
+
+**Lessons Learned:**
+- Excel format unsuitable for long-running crawls (no incremental checkpoint)
+- JSONL essential for crash recovery and progress tracking
+- Conservative retry strategy too slow for high-failure-rate datasets
+- Balanced mode + reduced retries optimal for defunct domain crawls
 
 ---
 
